@@ -1,0 +1,1 @@
+# Research repository for master's thesis on Anomaly detection in network traffic using autoencoders and clustering
