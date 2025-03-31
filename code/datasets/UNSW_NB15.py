@@ -3,6 +3,7 @@ from torch.utils.data import Dataset
 import json
 from pathlib import Path
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 from torch import tensor
 
 # class pre-declaration just to enable UNSWNB15Dataset for type hinting
@@ -12,13 +13,14 @@ class UNSWNB15Dataset(Dataset):
 class UNSWNB15Dataset(Dataset):
     """ UNSW-NB15 Dataset """
 
-    def __init__(self, data_dir, num_records : int | float | None = None, normal : int | float | None = None, test_for : UNSWNB15Dataset | None = None, random_state : int = 42):
+    def __init__(self, data_dir, num_records : int | float | None = None, normal : int | float | None = None, test_for : UNSWNB15Dataset | None = None, transformer : Pipeline | None = None, random_state : int = 42):
         """
         Parameters:
             data_dir (str): Path to the directory containing the dataset (directory with preprocesed csv files)
             num_records (int | float): Number (int) or proportion (float) of records to return. If None, return all records.
             normal (int | float): If float, it indicates the propotion of normal records to return. If int, it indicates number of them. If None, original proportion will be kept.
             test_for (UNSWNB15Dataset): If None, this will create a train dataset. Otherwise, previously created train dataset should be provided and it will create a test dataset for it.
+            transformer (Pipeline): Data transformation pipeline to apply to the data. If None, no transformation will be applied. If test_for is not None, transformer should be the same as for the train dataset (transformer is fitted only on the train dataset).
             random_state (int): Random seed for reproducibility
 
         Raises:
@@ -54,8 +56,16 @@ class UNSWNB15Dataset(Dataset):
 
 
         # load data from csv files and concatenate them
-        data_files = data_dir.glob("*.csv")
-        data = pd.concat((pd.read_csv(f, header=0, dtype=feature_dtypes, na_values=[" "]) for f in data_files), ignore_index=True, axis=0)
+        data_filenames = data_dir.glob("*.csv.gzip")
+        files = (pd.read_csv(f, 
+                             header=0, 
+                             dtype=feature_dtypes, 
+                             na_values=[" "], 
+                             engine='pyarrow',
+                             compression='gzip'
+                            ) for f in data_filenames)
+        
+        data = pd.concat(files, ignore_index=True, axis=0)
         
         # get actual number of records to return
         if num_records is None:
@@ -119,8 +129,13 @@ class UNSWNB15Dataset(Dataset):
         # shuffle the data
         data = data.sample(frac=1, random_state=self.random_state).reset_index(drop=True)
 
-        # separate data and labels
+        # apply data transformation pipeline
+        if transformer is not None and test_for is None:
+            data = transformer.fit_transform(data)
+        elif transformer is not None and test_for is not None:
+            data = transformer.transform(data)
 
+        # separate data and labels
         self.x = data.drop(columns=["Label"]).astype("float32")
         self.y = data["Label"].astype("int64")
 

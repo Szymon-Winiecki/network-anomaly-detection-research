@@ -36,7 +36,7 @@ feature_dtypes["sport"] = "object"
 feature_dtypes["dsport"] = "object"
 
 # load raw data from all files and concatenate them
-raw_data = pd.concat((pd.read_csv(raw_data_directory / f, names=feature_names, dtype=feature_dtypes, na_values=[" "]) for f in raw_data_filenames), ignore_index=True, axis=0)
+raw_data = pd.concat((pd.read_csv(raw_data_directory / f, names=feature_names, dtype=feature_dtypes, na_values=[" "], engine='pyarrow') for f in raw_data_filenames), ignore_index=True, axis=0)
 
 # remove source and destination IP addresses and ports as they are not useful for the analysis
 columns_to_drop = ["srcip", "sport", "dstip", "dsport"]
@@ -56,8 +56,8 @@ processed_data_directory.mkdir(parents=True, exist_ok=True)
 
 # split the data into num_processed_files files
 for i in range(num_processed_files):
-    processed_data_path = processed_data_directory / f"UNSW-NB15_{i}.csv"
-    processed_data.iloc[i::num_processed_files].to_csv(processed_data_path, index=False)
+    processed_data_path = processed_data_directory / f"UNSW-NB15_{i}.csv.gzip"
+    processed_data.iloc[i::num_processed_files].to_csv(processed_data_path, index=False, compression='gzip')
 
 # save feature dtypres to a json file
 with open(processed_data_directory / "UNSW-NB15_dtypes.json", "w") as f:
