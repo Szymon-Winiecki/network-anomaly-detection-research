@@ -7,3 +7,7 @@ Read [`data/README.md`](data/README.md) for more information.
 ## Data preprocessing
 
 Run `code/preprocessing/preprocess_UNSW-NB15.py` script.
+
+## MLFlow
+
+Start MLFlow server with `mlflow server --host 127.0.0.1 --port 8080`
