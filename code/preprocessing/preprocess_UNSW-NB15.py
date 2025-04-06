@@ -1,7 +1,10 @@
-import pandas as pd
 from pathlib import Path
-from sklearn.preprocessing import OneHotEncoder
 import json
+
+import pandas as pd
+
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import LabelEncoder
 
 this_directory = Path(__file__).parent.resolve()
 
@@ -48,6 +51,10 @@ one_hot_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore").se
 encoded = one_hot_encoder.fit_transform(processed_data[columns_to_one_hot_encode])
 processed_data = pd.concat([processed_data, encoded], axis=1).drop(columns=columns_to_one_hot_encode)
 
+# label encode the attack category
+label_encoder = LabelEncoder()
+processed_data["attack_cat"] = label_encoder.fit_transform(processed_data["attack_cat"])
+
 
 # save the processed data
 
@@ -62,3 +69,7 @@ for i in range(num_processed_files):
 # save feature dtypres to a json file
 with open(processed_data_directory / "UNSW-NB15_dtypes.json", "w") as f:
     json.dump(feature_dtypes, f)
+
+# save the label encoder to a json file
+with open(processed_data_directory / "UNSW-NB15_label_encoder.json", "w") as f:
+    json.dump(label_encoder.classes_.tolist(), f)

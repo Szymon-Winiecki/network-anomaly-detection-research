@@ -50,7 +50,7 @@ class SimpleAE(L.LightningModule):
         return x
     
     def training_step(self, batch, batch_idx):
-        x, _ = batch
+        x, _, _ = batch
         x_recon = self.forward(x)
         loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
 
@@ -78,7 +78,7 @@ class SimpleAE(L.LightningModule):
         self.train_step_losses.clear()
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, attack_cat = batch
         x_recon = self.forward(x)
 
         loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
@@ -116,7 +116,7 @@ class SimpleAE(L.LightningModule):
         self.validation_step_labels.clear()
     
     def predict_step(self, batch, batch_idx):
-        x, _ = batch
+        x, _, _ = batch
         x_recon = self.forward(x)
         loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
         pred = loss > self.threshold
