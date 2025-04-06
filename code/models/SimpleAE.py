@@ -4,6 +4,8 @@ from torch import nn, optim
 import torch.nn.functional as F
 import torch
 
+import torcheval.metrics.functional as tmf
+
 class SimpleAE(L.LightningModule):
     """ Small and simple Autoencoder model to make predicions based on reconstruction error """
 
@@ -12,23 +14,23 @@ class SimpleAE(L.LightningModule):
         self.save_hyperparameters()
 
         self.encoder = nn.Sequential(
-            nn.Linear(input_size, 1024),
+            nn.Linear(input_size, 128),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(1024, 256),
+            # nn.Dropout(0.3),
+            nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, latent_size)
+            # nn.Dropout(0.3),
+            nn.Linear(64, latent_size)
         )
 
         self.decoder = nn.Sequential(
-            nn.Linear(latent_size, 256),
+            nn.Linear(latent_size, 64),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, 1024),
+            # nn.Dropout(0.3),
+            nn.Linear(64, 128),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(1024, input_size)
+            # nn.Dropout(0.3),
+            nn.Linear(128, input_size)
         )
 
         self.threshold = 0
@@ -63,7 +65,13 @@ class SimpleAE(L.LightningModule):
     def on_train_epoch_end(self):
         losses = torch.cat(self.train_step_losses)
 
-        self.threshold = losses.mean() + 1 * losses.std()
+        self.threshold = losses.quantile(0.9)
+
+        self.log("losses_mean", losses.mean())
+        self.log("losses_std", losses.std())
+
+        self.log("min_loss", losses.min())
+        self.log("max_loss", losses.max())
 
         self.log("threshold", self.threshold)
 
@@ -78,7 +86,7 @@ class SimpleAE(L.LightningModule):
         self.validation_step_losses.append(loss)
         self.validation_step_labels.append(y)
         
-        # penalize loss for normal samples and reward for loss of anomalies
+        # penalize loss for normal samples and reward loss of anomalies
         weighted_loss = loss * (y * -2 + 1)
         weighted_loss = weighted_loss.mean()
 
@@ -91,11 +99,15 @@ class SimpleAE(L.LightningModule):
         losses = torch.cat(self.validation_step_losses)
         labels = torch.cat(self.validation_step_labels)
 
-        # Compute the accuracy of the model
         preds = losses > self.threshold
-        accuracy = (preds == labels).float().mean()
+
+        accuracy = tmf.binary_accuracy(preds, labels)
+        precision = tmf.binary_precision(preds, labels)
+        recall = tmf.binary_recall(preds, labels)
 
         self.log("val_accuracy", accuracy)
+        self.log("val_precision", precision)
+        self.log("val_recall", recall)
         self.log("positive_rate", preds.float().mean())
 
 
@@ -111,4 +123,4 @@ class SimpleAE(L.LightningModule):
         return pred
 
     def configure_optimizers(self):
-        return optim.Adam(self.parameters(), lr=1e-4)
+        return optim.Adam(self.parameters(), lr=1e-5)
