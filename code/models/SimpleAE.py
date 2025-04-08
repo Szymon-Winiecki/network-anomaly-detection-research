@@ -3,33 +3,34 @@ import lightning as L
 from torch import nn, optim
 import torch.nn.functional as F
 import torch
+from torch.optim.lr_scheduler import LinearLR
 
 import torcheval.metrics.functional as tmf
 
 class SimpleAE(L.LightningModule):
     """ Small and simple Autoencoder model to make predicions based on reconstruction error """
 
-    def __init__(self, input_size, latent_size):
+    def __init__(self, input_size, latent_size, dropout=0.3):
         super().__init__()
         self.save_hyperparameters()
 
         self.encoder = nn.Sequential(
             nn.Linear(input_size, 128),
             nn.ReLU(),
-            # nn.Dropout(0.3),
+            nn.Dropout(dropout),
             nn.Linear(128, 64),
             nn.ReLU(),
-            # nn.Dropout(0.3),
+            nn.Dropout(dropout),
             nn.Linear(64, latent_size)
         )
 
         self.decoder = nn.Sequential(
             nn.Linear(latent_size, 64),
             nn.ReLU(),
-            # nn.Dropout(0.3),
+            nn.Dropout(dropout),
             nn.Linear(64, 128),
             nn.ReLU(),
-            # nn.Dropout(0.3),
+            nn.Dropout(dropout),
             nn.Linear(128, input_size)
         )
 
@@ -42,6 +43,13 @@ class SimpleAE(L.LightningModule):
         # Store the losses and labels to compute metrics at the end of the epoch
         self.validation_step_losses = []
         self.validation_step_labels = []
+
+    def on_fit_start(self):
+        self.logger.log_hyperparams({
+            "model": self.__class__.__name__,
+            "max_epochs": self.trainer.max_epochs,
+            "optimizer": self.trainer.optimizers[0].__class__.__name__,
+        })
 
     def forward(self, x):
         x = self.encoder(x)
@@ -58,7 +66,7 @@ class SimpleAE(L.LightningModule):
 
         loss = loss.mean()
 
-        self.log("train_loss", loss)
+        self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True, reduce_fx="mean")
 
         return loss
     
@@ -75,6 +83,8 @@ class SimpleAE(L.LightningModule):
 
         self.log("threshold", self.threshold)
 
+        self.log("learning_rate", self.trainer.optimizers[0].param_groups[0]["lr"])
+
         self.train_step_losses.clear()
 
     def validation_step(self, batch, batch_idx):
@@ -90,7 +100,7 @@ class SimpleAE(L.LightningModule):
         weighted_loss = loss * (y * -2 + 1)
         weighted_loss = weighted_loss.mean()
 
-        self.log("val_loss", weighted_loss)
+        self.log("val_loss", weighted_loss, on_step=False, on_epoch=True, reduce_fx="mean")
  
         return weighted_loss
     
@@ -123,4 +133,14 @@ class SimpleAE(L.LightningModule):
         return pred
 
     def configure_optimizers(self):
-        return optim.Adam(self.parameters(), lr=1e-5)
+        optimizer = optim.Adam(self.parameters(), lr=1e-3)
+        scheduler = LinearLR(optimizer, start_factor=1, end_factor=0.1, total_iters=30)
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
