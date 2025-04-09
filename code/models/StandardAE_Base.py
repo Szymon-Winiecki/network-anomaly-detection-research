@@ -1,38 +1,28 @@
+from abc import ABCMeta, abstractmethod
+
 import lightning as L
 
-from torch import nn, optim
+from torch import optim
 import torch.nn.functional as F
 import torch
 from torch.optim.lr_scheduler import LinearLR
 
 import torcheval.metrics.functional as tmf
 
-class SimpleAE(L.LightningModule):
-    """ Small and simple Autoencoder model to make predicions based on reconstruction error """
+class StandardAE_Base(L.LightningModule, metaclass=ABCMeta):
+    """ Standard autoencoder model to make predicions based on reconstruction error """
 
     def __init__(self, input_size, latent_size, dropout=0.3):
         super().__init__()
         self.save_hyperparameters()
 
-        self.encoder = nn.Sequential(
-            nn.Linear(input_size, 128),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(64, latent_size)
-        )
+        self.input_size = input_size
+        self.latent_size = latent_size
+        self.dropout = dropout
 
-        self.decoder = nn.Sequential(
-            nn.Linear(latent_size, 64),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(64, 128),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(128, input_size)
-        )
+        self.encoder = self._build_encoder()
+
+        self.decoder = self._build_decoder()
 
         self.threshold = 0
 
@@ -43,6 +33,17 @@ class SimpleAE(L.LightningModule):
         # Store the losses and labels to compute metrics at the end of the epoch
         self.validation_step_losses = []
         self.validation_step_labels = []
+
+
+    @abstractmethod
+    def _build_encoder(self):
+        """ Create the encoder NN here """
+        pass
+    
+    @abstractmethod
+    def _build_decoder(self):
+        """ Create the decoder NN here """
+        pass
 
     def on_fit_start(self):
         self.logger.log_hyperparams({
@@ -66,8 +67,6 @@ class SimpleAE(L.LightningModule):
 
         loss = loss.mean()
 
-        self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True, reduce_fx="mean")
-
         return loss
     
     def on_train_epoch_end(self):
@@ -75,9 +74,8 @@ class SimpleAE(L.LightningModule):
 
         self.threshold = losses.quantile(0.9)
 
-        self.log("losses_mean", losses.mean())
-        self.log("losses_std", losses.std())
-
+        self.log("train_loss", losses.mean())
+        self.log("train_loss_std", losses.std())
         self.log("min_loss", losses.min())
         self.log("max_loss", losses.max())
 
@@ -95,14 +93,8 @@ class SimpleAE(L.LightningModule):
 
         self.validation_step_losses.append(loss)
         self.validation_step_labels.append(y)
-        
-        # penalize loss for normal samples and reward loss of anomalies
-        weighted_loss = loss * (y * -2 + 1)
-        weighted_loss = weighted_loss.mean()
-
-        self.log("val_loss", weighted_loss, on_step=False, on_epoch=True, reduce_fx="mean")
  
-        return weighted_loss
+        return loss.mean()
     
     def on_validation_epoch_end(self):
         # Concatenate all losses and labels of the samples in the validation step
@@ -114,10 +106,13 @@ class SimpleAE(L.LightningModule):
         accuracy = tmf.binary_accuracy(preds, labels)
         precision = tmf.binary_precision(preds, labels)
         recall = tmf.binary_recall(preds, labels)
+        f1 = tmf.binary_f1_score(preds, labels)
 
         self.log("val_accuracy", accuracy)
         self.log("val_precision", precision)
         self.log("val_recall", recall)
+        self.log("val_f1", f1)
+
         self.log("positive_rate", preds.float().mean())
 
 
