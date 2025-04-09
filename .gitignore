@@ -3,6 +3,8 @@ mlartifacts/
 lightning_logs/
 data/*/*
 
+code/bin_for_redundant_checkpoints/
+
 __pycache__/
 */__pycache__/
 **/__pycache__/
