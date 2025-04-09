@@ -8,6 +8,8 @@ import torcheval.metrics.functional as tmf
 import lightning as L
 from lightning.pytorch.loggers import MLFlowLogger
 
+import numpy as np
+
 class BAE:
     """
     BAE (BIRCH Auto Encoder) implementation.
@@ -43,38 +45,68 @@ class BAE:
         self.base_model_args = base_model_args
         self.base_model_kwargs = base_model_kwargs
 
+        self.set_tech_params()
 
+
+    def set_tech_params(self, 
+                        accelerator = "cpu", 
+                        batch_size : int = 1024, 
+                        num_workers : int = 1, 
+                        persistent_workers : bool = False):
+        """
+        Set the technical parameters for using the model.
+
+        Args:
+            accelerator (str): Accelerator to be used (see Lightning docs for availible options).
+            batch_size (int): Batch size for the DataLoaders.
+            num_workers (int): Number of workers for the DataLoader.
+            persistent_workers (bool): Persistent workers flag for the DataLoader.
+        """
+
+        self.tech_params = {
+            "accelerator": accelerator,
+            "batch_size": batch_size,
+            "num_workers": num_workers,
+            "persistent_workers": persistent_workers
+        }
 
     def fit(self, 
             data : torch.utils.data.Dataset, 
+            birch_fit_sample_size : int,
             experiment_name : str, 
             run_name : str, 
             tracking_uri : str = "http://127.0.0.1:8080", 
-            accelerator : str = "cpu", 
-            max_epochs : int = 10, 
-            batch_size : int = 1024):
+            max_epochs : int = 10):
         """
         Fit the BAE model to the data.
 
         Args:
             data (torch.utils.data.Dataset): Input data to train the model.
+            birch_fit_sample_size (int): Number of samples to fit the BIRCH model. Samples are randomly selected from the data.
             experiment_name (str): The name of the experiment.
             run_name (str): The name of the run.
             tracking_uri (str): Tracking URI for MLFlow.
-            accelerator (str): Accelerator to be used (see Lightning docs for availible options).
-            max_epochs (int): Maximum number of epochs for training.
-            batch_size (int): Batch size for training dataloaders.
         """
 
-        # fit birch model and get the cluster labels for each sample
-        clusters = self.birch.fit_predict(data.x.cpu().numpy())
+        # select a sample of the data to fit the birch model
+        # birch is trained on a sample of the data to speed up the process
+        # and to avoid memory issues
+        birch_fit_sample_size = min(birch_fit_sample_size, len(data))
+        rng = np.random.default_rng()
+        birch_fit_sample_indices = rng.choice(len(data), size=birch_fit_sample_size, replace=False)
+        birch_fit_samples = data.x[birch_fit_sample_indices].cpu().numpy()
+
+        # fir birch model with a sample of the data to speed up the clustering
+        self.birch.fit(birch_fit_samples)
+
+        # get the cluster label for each sample
+        clusters = self.birch.predict(data.x.cpu().numpy())
 
         # create separate datasets for each cluster
         cluster_dataloaders = []
         for i in range(self.birch.n_clusters):
             cluster_dataloader = self._get_filtered_loader(data,
                                                            filter = clusters == i,
-                                                           batch_size = batch_size,
                                                            shuffle = True)
 
             cluster_dataloaders.append(cluster_dataloader)
@@ -91,21 +123,16 @@ class BAE:
                 log_model=False,
             )
 
-            trainer = L.Trainer(accelerator=accelerator, max_epochs=max_epochs, logger=logger)
+            trainer = L.Trainer(accelerator=self.tech_params["accelerator"], max_epochs=max_epochs, logger=logger)
             trainer.fit(model, dataloader)
             self.autoencoders.append(model)
 
-    def predict(self, 
-                data : torch.utils.data.Dataset, 
-                batch_size : int = 1024, 
-                accelerator : str = "cpu"):
+    def predict(self, data : torch.utils.data.Dataset):
         """
         Predict the labels for the input data.
 
         Args:
             data (torch.utils.data.Dataset): dataset to predict.
-            batch_size (int): Batch size for the DataLoader.
-            accelerator (str): Accelerator to be used (see Lightning docs for availible options).
 
         Returns:
             torch.Tensor: The predicted labels.
@@ -114,12 +141,12 @@ class BAE:
         # get the cluster labels for each sample
         clusters = self.birch.predict(data.x.cpu().numpy())
 
-        dataloader = DataLoader(data, batch_size=batch_size, shuffle=False)
+        dataloader = self._get_loader(data, shuffle=False)
 
         # make predictions for all samples with each autoencoder
         independent_predictions = []
         for model in self.autoencoders:
-            trainer = L.Trainer(accelerator=accelerator, logger=False)
+            trainer = L.Trainer(accelerator=self.tech_params["accelerator"], logger=False)
             predictions = trainer.predict(model, dataloader)
             predictions = torch.cat(predictions, dim=0)
 
@@ -133,10 +160,7 @@ class BAE:
 
         return predictions
     
-    def evaluate(self, 
-                 data : torch.utils.data.Dataset, 
-                 batch_size : int = 1024, 
-                 accelerator : str = "cpu"):
+    def evaluate(self, data : torch.utils.data.Dataset):
         """
         Evaluate the model on the input data.
 
@@ -148,15 +172,13 @@ class BAE:
 
         Args:
             data (torch.utils.data.Dataset): Dataset to evaluate.
-            batch_size (int): Batch size for the DataLoader.
-            accelerator (str): Accelerator to be used (see Lightning docs for availible options).
 
         Returns:
             dict: The evaluation metrics.
         """
 
-        preds = self.predict(data, batch_size=batch_size, accelerator=accelerator)
-        labels = torch.tensor(data.y, device=preds.device)
+        preds = self.predict(data)
+        labels = data.y.clone().detach()
 
         accuracy = tmf.binary_accuracy(preds, labels)
         precision = tmf.binary_precision(preds, labels)
@@ -177,15 +199,13 @@ class BAE:
     def _get_filtered_loader(self, 
                              dataset : torch.utils.data.Dataset, 
                              filter : torch.Tensor, 
-                             batch_size : int = 1024, 
                              shuffle : bool = False):
         """ 
-        Create dataloader with samples that satisfy the filter.
+        Create dataloader with samples that satisfy the filter and complies with the technical parameters.
 
         Args:
             dataset (torch.utils.data.Dataset): The input dataset.
             filter (torch.Tensor): A boolean tensor to filter the dataset.
-            batch_size (int): The batch size for the DataLoader.
             shuffle (bool): DataLoader shuffle flag.
 
         Returns:
@@ -193,6 +213,27 @@ class BAE:
         """
         x, y, attack_cat = dataset[filter]
         filtered_dataset = TensorDataset(x, y, attack_cat)
-        filtered_dataloader = DataLoader(filtered_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=11, persistent_workers=True)
+        filtered_dataloader = self._get_loader(filtered_dataset, shuffle=shuffle)
 
         return filtered_dataloader
+    
+    def _get_loader(self, 
+                    dataset : torch.utils.data.Dataset, 
+                    shuffle : bool = False):
+        """ 
+        Create dataloader that complies with the technical parameters.
+
+        Args:
+            dataset (torch.utils.data.Dataset): The input dataset.
+            shuffle (bool): DataLoader shuffle flag.
+
+        Returns:
+            DataLoader: DataLoader containing only the filtered samples.
+        """
+        dataloader = DataLoader(dataset, 
+                                batch_size = self.tech_params["batch_size"], 
+                                shuffle = shuffle, 
+                                num_workers = self.tech_params["num_workers"], 
+                                persistent_workers = self.tech_params["persistent_workers"])
+
+        return dataloader
