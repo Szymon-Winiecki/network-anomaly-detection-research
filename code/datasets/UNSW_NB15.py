@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 import random
@@ -8,16 +7,14 @@ import pandas as pd
 from torch import tensor
 from torch.utils.data import Dataset
 
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder
 
-sys.path.append('./utils')
-from dataset_utils import load_features_dtypes, load_preprocessed_data, load_label_encoder, train_test_split_01
+this_directory = Path(__file__).parent.resolve()
+sys.path.append(str(this_directory / '../utils'))
+from dataset_utils import load_preprocessed_data, load_label_encoder, train_test_split_01
 
 def load_UNSWNB15Dataset(data_dir):
-    dtypes  = load_features_dtypes(data_dir)
-    data = load_preprocessed_data(data_dir, feature_dtypes = dtypes, na_values = [" "])
+    data = load_preprocessed_data(data_dir, na_values = [" "])
 
     return data
 
@@ -120,8 +117,7 @@ class UNSWNB15Dataset(Dataset):
 
         # load data from data_dir if not provided directly
         if data is None:
-            feature_dtypes = load_features_dtypes(data_dir)
-            data = load_preprocessed_data(data_dir, feature_dtypes, na_values = [" "])
+            data = load_preprocessed_data(data_dir, na_values = [" "])
 
         # load label encoder
         self.label_encoder = load_label_encoder(data_dir)

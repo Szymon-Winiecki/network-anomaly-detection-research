@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import sys
 
 import pandas as pd
 
@@ -7,6 +8,10 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import LabelEncoder
 
 this_directory = Path(__file__).parent.resolve()
+
+utils_directory = this_directory / Path("../utils/")
+sys.path.append(str(utils_directory))
+from dataset_utils import save_preprocessed_data
 
 raw_data_directory = this_directory / Path("../../data/UNSW-NB15/raw/CSV Files")
 raw_data_filenames = ["UNSW-NB15_1.csv", "UNSW-NB15_2.csv", "UNSW-NB15_3.csv", "UNSW-NB15_4.csv"]
@@ -34,7 +39,9 @@ type_map = {
 
 feature_dtypes = {feature: type_map[type] for feature, type in zip(feature_names, feature_types)}
 
-# some port numbers are stored as a hexadecimal number, so we need to treat it as a string (pandas can't handle hex numbers as Int64 when reading from csv). Moreover, port is reather a categorical feature than a numerical one.
+# some port numbers are stored as a hexadecimal number, so we need to treat it as a string 
+# (pandas can't handle hex numbers as Int64 when reading from csv). 
+# Moreover, port is reather a categorical feature than a numerical one.
 feature_dtypes["sport"] = "object"
 feature_dtypes["dsport"] = "object"
 
@@ -58,18 +65,11 @@ processed_data["attack_cat"] = label_encoder.fit_transform(processed_data["attac
 
 # save the processed data
 
-# create the directory if it does not exist
-processed_data_directory.mkdir(parents=True, exist_ok=True)
-
-# split the data into num_processed_files files
-for i in range(num_processed_files):
-    processed_data_path = processed_data_directory / f"UNSW-NB15_{i}.csv.gzip"
-    processed_data.iloc[i::num_processed_files].to_csv(processed_data_path, index=False, compression='gzip')
-
-# save feature dtypres to a json file
-with open(processed_data_directory / "UNSW-NB15_dtypes.json", "w") as f:
-    json.dump(feature_dtypes, f)
-
-# save the label encoder to a json file
-with open(processed_data_directory / "UNSW-NB15_label_encoder.json", "w") as f:
-    json.dump(label_encoder.classes_.tolist(), f)
+save_preprocessed_data(
+    processed_data, 
+    feature_dtypes = feature_dtypes, 
+    label_encoder = label_encoder, 
+    dir = processed_data_directory, 
+    filename_prefix = "UNSW-NB15", 
+    num_files = num_processed_files
+)
