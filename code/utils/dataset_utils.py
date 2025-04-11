@@ -62,16 +62,19 @@ def load_label_encoder(dir : str | Path, filename_regex : str = "*label_encoder.
 
     return label_encoder
 
-def load_preprocessed_data(dir : str | Path, feature_dtypes : dict, na_values : list):
+def load_preprocessed_data(dir : str | Path, feature_dtypes : dict | None = None, na_values : list = []):
     """ Loads preprocessed data from gzipped csv files in the given directory."
 
     Args:
         dir (str | Path): Path to the directory with the preprocessed dataset.
-        feature_dtypes (dict): Dictionary with feature names as keys and their types as values.
+        feature_dtypes (dict | None): Dictionary with feature names as keys and their types as values. If not provided, the dtypes will be loaded from the dir.
         na_values (list): List of values to consider as NA.
     """
     if not isinstance(dir, Path):
             dir = Path(dir)
+
+    if feature_dtypes is None:
+       feature_dtypes = load_features_dtypes(dir)
 
     data_filenames = dir.glob("*.csv.gzip")
     files = (pd.read_csv(f, 
@@ -85,6 +88,55 @@ def load_preprocessed_data(dir : str | Path, feature_dtypes : dict, na_values : 
     data = pd.concat(files, ignore_index=True, axis=0)
 
     return data
+
+def save_preprocessed_data(data : pd.DataFrame, feature_dtypes : dict | None, label_encoder : LabelEncoder | None, dir : str | Path, filename_prefix : str, num_files : int = 1):
+    """ Saves preprocessed datset in the given directory.
+    
+    Data is splitted into num_files files.
+    The data files will be named as <filename_prefix>_<i>.csv.gzip, where i is the file number.
+    The feature types will be saved to a json file named <filename_prefix>_dtypes.json.
+    The label encoder (if provided) will be saved to a json file named <filename_prefix>_label_encoder.json.
+
+    Args:
+        data (pd.DataFrame): Data to save.
+        feature_dtypes (dict | None): Dictionary with feature names as keys and their types as values. If None, the dtypes will be inferred from the data.
+        label_encoder (LabelEncoder | None): Label encoder to save. If None, the label encoder will not be saved.
+        dir (str | Path): Path to the directory where to save the data.
+        filename_prefix (str): Prefix for the filenames. Data files will be named as <filename_prefix>_<i>.csv.gzip, where i is the file number.
+        num_files (int): Number of files to split the data into.
+    """
+    if not isinstance(dir, Path):
+            dir = Path(dir)
+
+    # create the directory if it does not exist
+    dir.mkdir(parents=True, exist_ok=True)
+
+    # if feature dtypes are not provided, infer them from the data
+    if feature_dtypes is None:
+        feature_dtypes = {col: data[col].dtype.name for col in data.columns}
+
+    # save feature dtypes to a json file
+    with open(dir / f"{filename_prefix}_dtypes.json", "w") as f:
+        json.dump(feature_dtypes, f)
+
+    # save label encoder to a json file if provided
+    if label_encoder is not None:
+        with open(dir / f"{filename_prefix}_label_encoder.json", "w") as f:
+            json.dump(label_encoder.classes_.tolist(), f)
+
+    # save the data to num_files files
+
+    rows_per_file = len(data) // num_files
+    for i in range(num_files - 1):
+        processed_data_path = dir / f"{filename_prefix}_{i}.csv.gzip"
+
+        start = i * rows_per_file
+        end = (i + 1) * rows_per_file
+        data.iloc[start : end].to_csv(processed_data_path, index=False, compression='gzip')
+
+    # save the last file with the remaining rows
+    processed_data_path = dir / f"{filename_prefix}_{num_files - 1}.csv.gzip"
+    data.iloc[(num_files - 1) * rows_per_file :].to_csv(processed_data_path, index=False, compression='gzip')
 
 def train_test_split_01(data : pd.DataFrame,
                          test_size = None,
