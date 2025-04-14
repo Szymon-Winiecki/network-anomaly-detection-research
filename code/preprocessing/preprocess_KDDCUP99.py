@@ -21,8 +21,6 @@ test_dataset_file = raw_data_directory / Path("corrected.gz")
 features_file = raw_data_directory / Path("kddcup.names")
 
 processed_data_root = this_directory / Path("../../data/KDDCUP99/preprocessed/")
-processed_train_data_directory = processed_data_root / Path("train/")
-processed_test_data_directory = processed_data_root / Path("test/")
 
 with open(features_file, "r") as f:
     features_names = f.readlines()
@@ -65,7 +63,7 @@ one_hot_encoder = ColumnTransformer(
     verbose_feature_names_out=False,
 ).set_output(transform="pandas")
 
-# concatenated data fro fitting (because there are additional attack types in test data)
+# concatenated data for fitting (because there are additional attack types in test data)
 train_test_df = pd.concat([train_df, test_df], axis=0, ignore_index=True)
 
 # one-hot encode categorical features
@@ -82,19 +80,17 @@ test_df["attack_cat"] = label_encoder.transform(test_df["attack_cat"])
 # save the processed data
 save_preprocessed_data(
     train_df, 
-    feature_dtypes = None, 
-    label_encoder = label_encoder, 
-    dir = processed_train_data_directory, 
+    dir = processed_data_root / "train", 
     filename_prefix = "KDDCUP99_train", 
-    num_files = 10
+    label_encoder = label_encoder, 
+    num_files = 2
 )
 
 save_preprocessed_data(
     test_df, 
-    feature_dtypes = None, 
-    label_encoder = label_encoder, 
-    dir = processed_test_data_directory, 
+    dir = processed_data_root / "test", 
     filename_prefix = "KDDCUP99_test", 
+    label_encoder = label_encoder, 
     num_files = 1
 )
 

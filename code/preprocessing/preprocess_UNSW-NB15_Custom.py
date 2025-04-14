@@ -22,7 +22,6 @@ raw_data_filenames = ["CSV Files/UNSW-NB15_1.csv", "CSV Files/UNSW-NB15_2.csv", 
 features_description_filename = "CSV Files/NUSW-NB15_features.csv"
 
 processed_data_directory = this_directory / Path("../../data/UNSW-NB15/preprocessed/full")
-num_processed_files = 10
 
 # check if the zip file exists
 if not raw_data_zip.exists():
@@ -89,12 +88,14 @@ processed_data = pd.concat([processed_data, encoded], axis=1).drop(columns=colum
 label_encoder = LabelEncoder()
 processed_data["attack_cat"] = label_encoder.fit_transform(processed_data["attack_cat"])
 
+# rename Label to label to unify with other datasets
+processed_data.rename(columns={"Label": "label"}, inplace=True)
+
 # save the processed data
 save_preprocessed_data(
     processed_data, 
-    feature_dtypes = feature_dtypes, 
     label_encoder = label_encoder, 
     dir = processed_data_directory, 
     filename_prefix = "UNSW-NB15", 
-    num_files = num_processed_files
+    num_files = 20
 )
