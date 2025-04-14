@@ -27,8 +27,8 @@ def split_UNSWNB15Dataset(data_dir : str | Path,
                           transformer : Pipeline | None = None, 
                           random_state : int = None):
     
-    """ Splits the UNSW-NB15 dataset into train, validation and test sets. 
-        Args meaning the same as in UNSWNB15Dataset class constructor.
+    """ Splits the UNSW-NB15 dataset into custom train, validation and test sets. 
+        Args meaning the same as in UNSWNB15Dataset_Custom class constructor.
     """
 
     random_state = random_state if random_state is not None else random.randint(0, 2**32 - 1)
@@ -36,7 +36,7 @@ def split_UNSWNB15Dataset(data_dir : str | Path,
     if data is None:
         data = load_UNSWNB15Dataset(data_dir)
 
-    train_dataset = UNSWNB15Dataset(data_dir = data_dir,
+    train_dataset = UNSWNB15Dataset_Custom(data_dir = data_dir,
                                    data = data,
                                    type = "train",
                                    max_num_records = max_num_records,
@@ -45,7 +45,7 @@ def split_UNSWNB15Dataset(data_dir : str | Path,
                                    transformer = transformer,
                                    random_state = random_state)
     
-    val_dataset = UNSWNB15Dataset(data_dir = data_dir,
+    val_dataset = UNSWNB15Dataset_Custom(data_dir = data_dir,
                                     data = data,
                                     type = "val",
                                     max_num_records = max_num_records,
@@ -54,7 +54,7 @@ def split_UNSWNB15Dataset(data_dir : str | Path,
                                     transformer = transformer,
                                     random_state = random_state)
     
-    test_dataset = UNSWNB15Dataset(data_dir = data_dir,
+    test_dataset = UNSWNB15Dataset_Custom(data_dir = data_dir,
                                     data = data,
                                     type = "test",
                                     max_num_records = max_num_records,
@@ -66,12 +66,11 @@ def split_UNSWNB15Dataset(data_dir : str | Path,
     return train_dataset, val_dataset, test_dataset
 
 
-# class pre-declaration just to enable UNSWNB15Dataset for type hinting
-class UNSWNB15Dataset(Dataset):
-    pass
-
-class UNSWNB15Dataset(Dataset):
-    """ UNSW-NB15 Dataset """
+class UNSWNB15Dataset_Custom(Dataset):
+    """ UNSW-NB15 Dataset class to create custom train, validation and test sets from the whole UNSW-NB15 dataset (over 2 500 000 records).
+    The dataset is split into train, validation and test sets based on the given proportions or quantities of records to return for each set.
+    Those datesets are not the same as the original splits.
+    """
 
     def __init__(self, 
                  data_dir : str | Path, 
@@ -166,9 +165,6 @@ class UNSWNB15Dataset(Dataset):
             data = pd.concat([normal_val, attack_val], ignore_index=True, axis=0)
         elif type == "test":
             data = pd.concat([normal_test, attack_test], ignore_index=True, axis=0)
-
-        # shuffle the data
-        data = data.sample(frac=1, random_state=self.random_state).reset_index(drop=True)
 
         # separate data, target (0: normal, 1: anomaly) and attack categories
         self.x = data.drop(columns=["Label", "attack_cat"]).astype("float32")
