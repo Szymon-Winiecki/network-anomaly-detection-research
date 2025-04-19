@@ -89,7 +89,7 @@ def load_preprocessed_data(dir : str | Path, feature_dtypes : dict | None = None
 
     return data
 
-def save_preprocessed_data(data : pd.DataFrame, feature_dtypes : dict | None, label_encoder : LabelEncoder | None, dir : str | Path, filename_prefix : str, num_files : int = 1):
+def save_preprocessed_data(data : pd.DataFrame, dir : str | Path, filename_prefix : str = "data", feature_dtypes : dict | None = None,  label_encoder : LabelEncoder | None = None, num_files : int = 1):
     """ Saves preprocessed datset in the given directory.
     
     Data is splitted into num_files files.
@@ -99,10 +99,10 @@ def save_preprocessed_data(data : pd.DataFrame, feature_dtypes : dict | None, la
 
     Args:
         data (pd.DataFrame): Data to save.
-        feature_dtypes (dict | None): Dictionary with feature names as keys and their types as values. If None, the dtypes will be inferred from the data.
-        label_encoder (LabelEncoder | None): Label encoder to save. If None, the label encoder will not be saved.
         dir (str | Path): Path to the directory where to save the data.
         filename_prefix (str): Prefix for the filenames. Data files will be named as <filename_prefix>_<i>.csv.gzip, where i is the file number.
+        feature_dtypes (dict | None): Dictionary with feature names as keys and their types as values. If None, the dtypes will be inferred from the data.
+        label_encoder (LabelEncoder | None): Label encoder to save. If None, the label encoder will not be saved.
         num_files (int): Number of files to split the data into.
     """
     if not isinstance(dir, Path):

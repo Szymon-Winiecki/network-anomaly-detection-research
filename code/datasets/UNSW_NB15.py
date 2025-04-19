@@ -13,22 +13,22 @@ this_directory = Path(__file__).parent.resolve()
 sys.path.append(str(this_directory / '../utils'))
 from dataset_utils import load_preprocessed_data, load_label_encoder
 
-class KDDCUP99Dataset(Dataset):
+class UNSWNB15Dataset(Dataset):
 
     # debug flag to print dataset statistics
     DEBUG = True
 
     # number of anomaly an normal records to be placed in the validation set
-    # those are identical with the ones in the test set
-    VAL_NUM_ANOMALIES = 250436
-    VAL_NUM_NORMAL = 60593
+    # identical proportions to the ones in the test set
+    VAL_NUM_ANOMALIES = 12252
+    VAL_NUM_NORMAL = 10000
 
     def __init__(self, 
                  root_dir: str | Path, 
                  type: str = "train", 
                  transformer : Pipeline | None = None,
                  random_state: int = 42):
-        """KDDCUP99 dataset class.
+        """UNSW_NB19 dataset class.
 
         Args:
             root_dir (str | Path): Path to the directory with the processed datasets (root dir of test and train sets).
@@ -54,17 +54,17 @@ class KDDCUP99Dataset(Dataset):
             data = data[data["label"] == 0]
 
             # separete validation records from training records
-            data, val = train_test_split(data, test_size=KDDCUP99Dataset.VAL_NUM_NORMAL, random_state=random_state)
+            data, val = train_test_split(data, test_size=UNSWNB15Dataset.VAL_NUM_NORMAL, random_state=random_state)
         if type == "val":
             
             anomalies = data[data["label"] == 1]
             normal = data[data["label"] == 0]
 
             # select appriopriate number of anomaly records
-            anomalies = anomalies.sample(n=KDDCUP99Dataset.VAL_NUM_ANOMALIES, random_state=random_state)
+            anomalies = anomalies.sample(n=UNSWNB15Dataset.VAL_NUM_ANOMALIES, random_state=random_state)
 
             # separate normal validation records from training records
-            train, normal = train_test_split(normal, test_size=KDDCUP99Dataset.VAL_NUM_NORMAL, random_state=random_state)
+            train, normal = train_test_split(normal, test_size=UNSWNB15Dataset.VAL_NUM_NORMAL, random_state=random_state)
 
             # concatenate normal and anomaly records
             data = pd.concat([normal, anomalies], axis=0)
@@ -73,7 +73,7 @@ class KDDCUP99Dataset(Dataset):
             # there is no need to split test data
             pass
 
-        if KDDCUP99Dataset.DEBUG:
+        if UNSWNB15Dataset.DEBUG:
             print(f"\nLoaded {type} data with {len(data)} samples.")
             print(f"Data shape: {data.shape}")
             print(f"num_anomalies: {data['label'].sum()}")
