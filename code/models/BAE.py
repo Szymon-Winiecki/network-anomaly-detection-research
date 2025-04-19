@@ -73,6 +73,7 @@ class BAE:
     def fit(self, 
             data : torch.utils.data.Dataset, 
             birch_fit_sample_size : int,
+            birch_fit_quantile : float,
             experiment_name : str, 
             run_name : str, 
             tracking_uri : str = "http://127.0.0.1:8080", 
@@ -83,6 +84,8 @@ class BAE:
         Args:
             data (torch.utils.data.Dataset): Input data to train the model.
             birch_fit_sample_size (int): Number of samples to fit the BIRCH model. Samples are randomly selected from the data.
+            birch_fit_quantile (float): Quantile to determine the outlier threshold for samples. 
+                BIRCH is trained on samples with a magnitude lower than the threshold, to prevent outliers from affecting the clustering.
             experiment_name (str): The name of the experiment.
             run_name (str): The name of the run.
             tracking_uri (str): Tracking URI for MLFlow.
@@ -96,8 +99,11 @@ class BAE:
         birch_fit_sample_indices = rng.choice(len(data), size=birch_fit_sample_size, replace=False)
         birch_fit_samples = data.x[birch_fit_sample_indices].cpu().numpy()
 
+        fit_samples_magnitude = np.linalg.norm(birch_fit_samples, axis=1)
+        outlier_threshold = np.quantile(fit_samples_magnitude, birch_fit_quantile)
+
         # fir birch model with a sample of the data to speed up the clustering
-        self.birch.fit(birch_fit_samples)
+        self.birch.fit(birch_fit_samples[fit_samples_magnitude < outlier_threshold])
 
         # get the cluster label for each sample
         clusters = self.birch.predict(data.x.cpu().numpy())
@@ -124,6 +130,13 @@ class BAE:
             )
 
             trainer = L.Trainer(accelerator=self.tech_params["accelerator"], max_epochs=max_epochs, logger=logger)
+
+            # for some strange reason, mlflow logger always saves two copies of the checkpoint
+            # First (desired) in mlartifacts folder and the second (unwanted) in the notebook's dir
+            # This is a workaround to gitignore second copy and easily remove it after training 
+            # see https://github.com/Lightning-AI/pytorch-lightning/issues/17904 for more info
+            trainer.checkpoint_callback.dirpath = "bin_for_redundant_checkpoints"
+
             trainer.fit(model, dataloader)
             self.autoencoders.append(model)
 
@@ -160,6 +173,46 @@ class BAE:
 
         return predictions
     
+    def predict_anomaly_score(self, data : torch.utils.data.Dataset):
+        """
+        Predict the anomaly score for the input data.
+
+        Args:
+            data (torch.utils.data.Dataset): dataset to predict.
+
+        Returns:
+            torch.Tensor: The predicted anomaly scores.
+        """
+
+        # get the cluster labels for each sample
+        clusters = self.birch.predict(data.x.cpu().numpy())
+
+        dataloader = self._get_loader(data, shuffle=False)
+
+        # make predictions for all samples with each autoencoder
+        independent_predictions = []
+        for model in self.autoencoders:
+            
+            model_mode = model.training
+            model.eval()
+            scores = []
+            with torch.no_grad():
+                for x, y, attack_cat in dataloader:
+                    socre = model.predict_anomaly_score(x)
+                    scores.append(socre.cpu().numpy())
+            scores = torch.tensor(np.concatenate(scores))
+
+            model.train(model_mode)
+
+            independent_predictions.append(scores)
+
+        # for each sample select the prediction of the AE of corresponding cluster
+        predictions = torch.stack(independent_predictions, dim=1)
+        clusters = torch.tensor(clusters, device=predictions.device)
+        predictions = predictions[torch.arange(predictions.size(0)), clusters]
+
+        return predictions
+    
     def evaluate(self, data : torch.utils.data.Dataset):
         """
         Evaluate the model on the input data.
@@ -169,6 +222,7 @@ class BAE:
             - precision
             - recall
             - f1 score
+            - auroc
 
         Args:
             data (torch.utils.data.Dataset): Dataset to evaluate.
@@ -178,18 +232,22 @@ class BAE:
         """
 
         preds = self.predict(data)
+        anomaly_scores = self.predict_anomaly_score(data)
         labels = data.y.clone().detach()
 
         accuracy = tmf.binary_accuracy(preds, labels)
         precision = tmf.binary_precision(preds, labels)
         recall = tmf.binary_recall(preds, labels)
         f1 = tmf.binary_f1_score(preds, labels)
+        auroc = tmf.binary_auroc(anomaly_scores, labels)
+
 
         metrics = {
             "accuracy": accuracy,
             "precision": precision,
             "recall": recall,
-            "f1": f1
+            "f1": f1,
+            "auroc": auroc
         }
 
         return metrics
