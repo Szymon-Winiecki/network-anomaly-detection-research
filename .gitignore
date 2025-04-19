@@ -2,6 +2,8 @@ mlruns/
 mlartifacts/
 lightning_logs/
 data/*/*
+out/
+debug.log
 
 code/bin_for_redundant_checkpoints/
 
