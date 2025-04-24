@@ -1,6 +1,8 @@
-from abc import ABCMeta, abstractmethod
+from datetime import datetime
+from pathlib import Path
 
 import lightning as L
+from lightning.pytorch.loggers import MLFlowLogger
 
 from torch import nn, optim
 import torch.nn.functional as F
@@ -10,7 +12,9 @@ from torch.optim.lr_scheduler import LinearLR
 # import torcheval.metrics.functional as tmf
 import torchmetrics.functional as tmf
 
-class StandardAE(L.LightningModule):
+from IADModel import IADModel
+
+class StandardAE(L.LightningModule, IADModel):
     """ Standard autoencoder model to make predicions based on reconstruction error """
 
     def __init__(self, 
@@ -34,7 +38,10 @@ class StandardAE(L.LightningModule):
             linear_lr_end_factor (float, optional): End factor for the linear learning rate scheduler. Defaults to 0.1.
             linear_lr_total_iters (int, optional): Total iterations (num epochs) for the linear learning rate scheduler. Defaults to 100.
         """
+
         super().__init__()
+        IADModel.__init__(self)
+
         self.save_hyperparameters()
 
         self.input_size = input_size
@@ -61,9 +68,11 @@ class StandardAE(L.LightningModule):
         self.validation_step_losses = []
         self.validation_step_labels = []
 
+        self.test_step_losses = []
+        self.test_step_labels = []
+
 
     def _build_encoder(self):
-        """ Create the encoder NN here """
         encoder = nn.Sequential()
         input_size = self.input_size
         for hidden_size in self.hidden_sizes[:-1]:
@@ -153,8 +162,6 @@ class StandardAE(L.LightningModule):
         losses = torch.cat(self.validation_step_losses)
         labels = torch.cat(self.validation_step_labels)
 
-        # self.adjust_threshold(losses, labels)
-
         preds = losses > self.threshold
 
         accuracy = tmf.accuracy(preds, labels, task="binary")
@@ -175,6 +182,41 @@ class StandardAE(L.LightningModule):
         # Reset the losses and labels for the next epoch
         self.validation_step_losses.clear()
         self.validation_step_labels.clear()
+
+    def test_step(self, batch, batch_idx):
+        x, y, attack_cat = batch
+        x_recon = self.forward(x)
+
+        loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+        loss = F.tanh(loss)
+
+        self.test_step_losses.append(loss)
+        self.test_step_labels.append(y)
+
+        return loss.mean()
+    
+    def on_test_epoch_end(self):
+        # Concatenate all losses and labels of the samples in the test step
+        losses = torch.cat(self.test_step_losses)
+        labels = torch.cat(self.test_step_labels)
+
+        preds = losses > self.threshold
+
+        accuracy = tmf.accuracy(preds, labels, task="binary")
+        precision = tmf.precision(preds, labels, task="binary")
+        recall = tmf.recall(preds, labels, task="binary")
+        f1 = tmf.f1_score(preds, labels, task="binary")
+        auroc = tmf.auroc(losses, labels, task="binary")
+
+        self.log("test_accuracy", accuracy)
+        self.log("test_precision", precision)
+        self.log("test_recall", recall)
+        self.log("test_f1", f1)
+        self.log("test_auroc", auroc)
+
+        # Reset the losses and labels for the next epoch
+        self.test_step_losses.clear()
+        self.test_step_labels.clear()
     
     def predict_step(self, batch, batch_idx):
         x, _, _ = batch
@@ -214,7 +256,6 @@ class StandardAE(L.LightningModule):
             y (torch.Tensor): The labels.
         """
 
-        # Compute the best threshold based on the F1 score
         thresholds = torch.linspace(0, 1, 500)
         f1_scores = []
 
@@ -226,3 +267,125 @@ class StandardAE(L.LightningModule):
         best_threshold = thresholds[torch.argmax(torch.tensor(f1_scores))]
 
         self.threshold = best_threshold
+
+    def fit(self, 
+            train_dataset, 
+            val_dataset = None, 
+            max_epochs=10, 
+            log=False, 
+            logger_params={}):
+
+        if log:
+            logger_params = self.default_logger_params | logger_params
+            logger = MLFlowLogger(**logger_params)
+        else:
+            logger = None
+
+        trainer = L.Trainer(accelerator=self.tech_params["accelerator"], max_epochs=max_epochs, logger=logger)
+
+        # for some strange reason, mlflow logger always saves two copies of the checkpoint
+        # First (desired) in mlartifacts folder and the second (unwanted) in the notebook's dir
+        # This is a workaround to gitignore second copy and easily remove it after training 
+        # see https://github.com/Lightning-AI/pytorch-lightning/issues/17904 for more info
+        trainer.checkpoint_callback.dirpath = self.redundant_checkpoints_dir
+
+        train_loader = self._get_loader(train_dataset, shuffle=True)
+        val_loader = self._get_loader(val_dataset, shuffle=False) if val_dataset else None
+
+        trainer.fit(self, train_loader, val_loader)
+
+    def evaluate(self, test_dataset, logger_params = {}):
+        
+        if logger_params:
+            logger_params = self.default_logger_params | logger_params
+            logger = MLFlowLogger(**logger_params)
+        else:
+            logger = None
+
+        trainer = L.Trainer(accelerator=self.tech_params["accelerator"], logger=logger)
+
+        test_loader = self._get_loader(test_dataset, shuffle=False)
+
+        metrics = trainer.test(self, test_loader)
+
+        return metrics
+
+    def predict(self, dataset):
+        self.threshold = self.threshold.to(device=self.device)
+
+        model_mode = self.training
+        self.eval()
+
+        dataloader = self._get_loader(dataset, shuffle=False)
+
+        predictions = []
+
+        with torch.no_grad():
+            for x, _, _ in dataloader:
+                x = x.to(device=self.device)
+                x_recon = self.forward(x)
+                loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+                loss = F.tanh(loss)
+                pred = loss > self.threshold
+
+                predictions.append(pred)
+
+        predictions = torch.cat(predictions)
+
+        self.train(model_mode)
+
+        return predictions
+
+
+    def predict_raw(self, dataset):
+        self.threshold = self.threshold.to(device=self.device)
+
+        model_mode = self.training
+        self.eval()
+
+        dataloader = self._get_loader(dataset, shuffle=False)
+
+        scores = []
+
+        with torch.no_grad():
+            for x, _, _ in dataloader:
+                x = x.to(device=self.device)
+                x_recon = self.forward(x)
+                loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+                loss = F.tanh(loss)
+
+                scores.append(loss)
+
+        scores = torch.cat(scores)
+
+        self.train(model_mode)
+
+        return scores
+
+    def save(self, path):
+
+        if path is None:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+            path = self.default_model_save_dir / f"{self.__class__.__name__}_{timestamp}.pt"
+
+        if not isinstance(path, Path):
+            path = Path(path)
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        torch.save({
+            "state_dict": self.state_dict(),
+            "hyper_parameters": self.hparams,
+        }, path)
+
+        return path
+
+    @staticmethod
+    def load(path):
+        
+        checkpoint = torch.load(path)
+        model = IStandardAE(**checkpoint["hyper_parameters"])
+        model.load_state_dict(checkpoint["state_dict"])
+
+        return model
+
