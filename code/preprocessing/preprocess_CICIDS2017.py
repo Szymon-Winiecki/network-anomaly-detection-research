@@ -8,6 +8,7 @@ import numpy as np
 
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
 
 
 this_directory = Path(__file__).parent.resolve()
@@ -20,6 +21,10 @@ from dataset_utils import save_preprocessed_data
 raw_data_zip = this_directory / Path("../../data/CIC-IDS2017/raw/MachineLearningCSV.zip")
 
 processed_data_root_directory = this_directory / Path("../../data/CIC-IDS2017/preprocessed/")
+
+RANDOM_STATE = 42
+TEST_NUM_ANOMALIES = 278823
+TEST_NUM_NORMAL = 278823
 
 # check if the zip file exists
 if not raw_data_zip.exists():
@@ -85,11 +90,27 @@ data["attack_cat"] = label_encoder.fit_transform(data["label"])
 # binarize the label column
 data["label"] = data["label"].apply(lambda x: 0 if x == "BENIGN" else 1)
 
+# split the data into train and test sets
+train_normal, test_normal = train_test_split(data[data["label"] == 0], test_size=TEST_NUM_NORMAL, random_state=RANDOM_STATE)
+train_anomaly, test_anomaly = train_test_split(data[data["label"] == 1], test_size=TEST_NUM_ANOMALIES, random_state=RANDOM_STATE)
+
+# concatenate normal and anomaly records
+train = pd.concat([train_normal, train_anomaly], axis=0)
+test = pd.concat([test_normal, test_anomaly], axis=0)
+
 # save the processed data
 save_preprocessed_data(
-    data, 
-    dir = processed_data_root_directory / "full", 
-    filename_prefix = "CICIDS2017", 
+    train, 
+    dir = processed_data_root_directory / "train", 
+    filename_prefix = "CICIDS2017_train", 
+    label_encoder = label_encoder, 
+    num_files = 10
+)
+
+save_preprocessed_data(
+    test, 
+    dir = processed_data_root_directory / "test", 
+    filename_prefix = "CICIDS2017_test", 
     label_encoder = label_encoder, 
     num_files = 10
 )
