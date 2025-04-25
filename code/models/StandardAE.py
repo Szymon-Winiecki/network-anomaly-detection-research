@@ -273,7 +273,8 @@ class StandardAE(L.LightningModule, IADModel):
             val_dataset = None, 
             max_epochs=10, 
             log=False, 
-            logger_params={}):
+            logger_params={},
+            random_state=None):
 
         if log:
             logger_params = self.default_logger_params | logger_params
@@ -365,8 +366,7 @@ class StandardAE(L.LightningModule, IADModel):
     def save(self, path):
 
         if path is None:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
-            path = self.default_model_save_dir / f"{self.__class__.__name__}_{timestamp}.pt"
+            path = self._gen_default_checkpoint_path()
 
         if not isinstance(path, Path):
             path = Path(path)
@@ -376,6 +376,7 @@ class StandardAE(L.LightningModule, IADModel):
         torch.save({
             "state_dict": self.state_dict(),
             "hyper_parameters": self.hparams,
+            "threshold": self.threshold,
         }, path)
 
         return path
@@ -384,8 +385,9 @@ class StandardAE(L.LightningModule, IADModel):
     def load(path):
         
         checkpoint = torch.load(path)
-        model = IStandardAE(**checkpoint["hyper_parameters"])
+        model = StandardAE(**checkpoint["hyper_parameters"])
         model.load_state_dict(checkpoint["state_dict"])
+        model.threshold = checkpoint["threshold"]
 
         return model
 

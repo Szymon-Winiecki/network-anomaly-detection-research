@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from torch.utils.data import Dataset, DataLoader
 import torch
@@ -31,7 +32,8 @@ class IADModel(ABC):
             val_dataset: Dataset = None, 
             max_epochs = 10, 
             log = False, 
-            logger_params = {}) -> None:
+            logger_params = {},
+            random_state = None) -> None:
         """
         Train the model with the given data.
         """
@@ -121,3 +123,9 @@ class IADModel(ABC):
                                 persistent_workers = self.tech_params["persistent_workers"])
 
         return dataloader
+    
+    def _gen_default_checkpoint_path(self) -> Path:
+        """
+        Generate default and unique path to save the model checkpoint.
+        """
+        return Path(self.default_model_save_dir) / f"{self.__class__.__name__}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')}.pt"

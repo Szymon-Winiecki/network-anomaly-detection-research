@@ -1,16 +1,19 @@
+from pathlib import Path
+
 from sklearn.cluster import Birch
 
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import TensorDataset
 import torch
 
 import torcheval.metrics.functional as tmf
 
-import lightning as L
-from lightning.pytorch.loggers import MLFlowLogger
+import mlflow
 
 import numpy as np
 
-class BAE:
+from IADModel import IADModel
+
+class BAE(IADModel):
     """
     BAE (BIRCH Auto Encoder) implementation.
 
@@ -24,7 +27,9 @@ class BAE:
                  birch_threshold : float, 
                  birch_branching_factor : int, 
                  birch_n_clusters : int, 
-                 base_model : L.LightningModule, 
+                 birch_fit_sample_size : int,
+                 birch_fit_quantile : float,
+                 base_model : IADModel, 
                  *base_model_args, 
                  **base_model_kwargs):
         """
@@ -34,10 +39,27 @@ class BAE:
             birch_threshold (float): The threshold for the Birch clustering.
             birch_branching_factor (int): The branching factor for the Birch clustering.
             birch_n_clusters (int): The number of clusters for the Birch clustering.
+            birch_fit_sample_size (int): Number of samples to fit the BIRCH model. Samples are randomly selected from the data.
+            birch_fit_quantile (float): Quantile to determine the outlier threshold for samples. 
+                BIRCH is trained on samples with a magnitude lower than the threshold, to prevent outliers from affecting the clustering.
             base_model (LightningModule): Autoencoder model class to be trained on each cluster.
             *base_model_args: Positional arguments for the base model.
             **base_model_kwargs: Keyword arguments for the base model.
         """
+
+        IADModel.__init__(self)
+
+        # store hyperparameters to allow saving and loading model 
+        self.hparams = {
+            "birch_threshold": birch_threshold,
+            "birch_branching_factor": birch_branching_factor,
+            "birch_n_clusters": birch_n_clusters,
+            "birch_fit_sample_size": birch_fit_sample_size,
+            "birch_fit_quantile": birch_fit_quantile,
+            "base_model": base_model,
+            "base_model_args": base_model_args,
+            "base_model_kwargs": base_model_kwargs
+        }
 
         self.birch = Birch(threshold=birch_threshold, branching_factor=birch_branching_factor, n_clusters=birch_n_clusters)
 
@@ -45,195 +67,94 @@ class BAE:
         self.base_model_args = base_model_args
         self.base_model_kwargs = base_model_kwargs
 
-        self.set_tech_params()
+        self.birch_fit_sample_size = birch_fit_sample_size
+        self.birch_fit_quantile = birch_fit_quantile
 
-
-    def set_tech_params(self, 
-                        accelerator = "cpu", 
-                        batch_size : int = 1024, 
-                        num_workers : int = 1, 
-                        persistent_workers : bool = False):
-        """
-        Set the technical parameters for using the model.
-
-        Args:
-            accelerator (str): Accelerator to be used (see Lightning docs for availible options).
-            batch_size (int): Batch size for the DataLoaders.
-            num_workers (int): Number of workers for the DataLoader.
-            persistent_workers (bool): Persistent workers flag for the DataLoader.
-        """
-
-        self.tech_params = {
-            "accelerator": accelerator,
-            "batch_size": batch_size,
-            "num_workers": num_workers,
-            "persistent_workers": persistent_workers
-        }
 
     def fit(self, 
-            data : torch.utils.data.Dataset, 
-            birch_fit_sample_size : int,
-            birch_fit_quantile : float,
-            experiment_name : str, 
-            run_name : str, 
-            tracking_uri : str = "http://127.0.0.1:8080", 
-            max_epochs : int = 10):
-        """
-        Fit the BAE model to the data.
+            train_dataset, 
+            val_dataset = None,
+            max_epochs = 10,
+            log = False,
+            logger_params = {},
+            random_state = None):
+        
+        logger_params = self.default_logger_params | logger_params
 
-        Args:
-            data (torch.utils.data.Dataset): Input data to train the model.
-            birch_fit_sample_size (int): Number of samples to fit the BIRCH model. Samples are randomly selected from the data.
-            birch_fit_quantile (float): Quantile to determine the outlier threshold for samples. 
-                BIRCH is trained on samples with a magnitude lower than the threshold, to prevent outliers from affecting the clustering.
-            experiment_name (str): The name of the experiment.
-            run_name (str): The name of the run.
-            tracking_uri (str): Tracking URI for MLFlow.
-        """
+        if log:
+            mlflow.set_tracking_uri(logger_params["tracking_uri"])
+            mlflow.set_experiment(logger_params["experiment_name"])
+            mlflow_run = mlflow.start_run(run_name=logger_params["run_name"])
+            mlflow.log_params(self.hparams | {"base_model" : self.base_model.__name__}, run_id=mlflow_run.info.run_id)
+            mlflow.log_params(logger_params["tags"], run_id=mlflow_run.info.run_id)
 
         # select a sample of the data to fit the birch model
         # birch is trained on a sample of the data to speed up the process
         # and to avoid memory issues
-        birch_fit_sample_size = min(birch_fit_sample_size, len(data))
-        rng = np.random.default_rng()
-        birch_fit_sample_indices = rng.choice(len(data), size=birch_fit_sample_size, replace=False)
-        birch_fit_samples = data.x[birch_fit_sample_indices].cpu().numpy()
+        birch_fit_sample_size = min(self.birch_fit_sample_size, len(train_dataset))
+        rng = np.random.default_rng(random_state)
+        birch_fit_sample_indices = rng.choice(len(train_dataset), size=birch_fit_sample_size, replace=False)
+        birch_fit_samples = train_dataset.x[birch_fit_sample_indices].cpu().numpy()
 
         fit_samples_magnitude = np.linalg.norm(birch_fit_samples, axis=1)
-        outlier_threshold = np.quantile(fit_samples_magnitude, birch_fit_quantile)
+        outlier_threshold = np.quantile(fit_samples_magnitude, self.birch_fit_quantile)
 
-        # fir birch model with a sample of the data to speed up the clustering
         self.birch.fit(birch_fit_samples[fit_samples_magnitude < outlier_threshold])
 
         # get the cluster label for each sample
-        clusters = self.birch.predict(data.x.cpu().numpy())
+        train_clusters = self.birch.predict(train_dataset.x.cpu().numpy())
+        val_clusters = self.birch.predict(val_dataset.x.cpu().numpy()) if val_dataset is not None else None
 
         # create separate datasets for each cluster
-        cluster_dataloaders = []
+        cluster_train_datasets = []
+        cluster_val_datasets = []
         for i in range(self.birch.n_clusters):
-            cluster_dataloader = self._get_filtered_loader(data,
-                                                           filter = clusters == i,
-                                                           shuffle = True)
+            filtered_dataset = self._get_filtered_dataset(train_dataset,
+                                                           filter = train_clusters == i)
+            cluster_train_datasets.append(filtered_dataset)
 
-            cluster_dataloaders.append(cluster_dataloader)
+            if val_clusters is not None:
+                filtered_dataset = self._get_filtered_dataset(val_dataset,
+                                                               filter = val_clusters == i)
+                cluster_val_datasets.append(filtered_dataset)
+            else:
+                cluster_val_datasets.append(None)
 
         # fit autoencoder model on each cluster
         self.autoencoders = []
-        for i, dataloader in enumerate(cluster_dataloaders):
-            model = self.base_model(*self.base_model_args, **self.base_model_kwargs)
+        for i, (cluster_train_dataset, cluster_val_dataset) in enumerate(zip(cluster_train_datasets, cluster_val_datasets)):
+            cluster_model = self.base_model(*self.base_model_args, **self.base_model_kwargs)
 
-            logger = MLFlowLogger(
-                experiment_name=experiment_name,
-                tracking_uri=tracking_uri,
-                run_name=f"{run_name}_AE{i}",
-                log_model=False,
+            cluster_model.set_tech_params(**self.tech_params)
+
+            cluster_model_logger_params = logger_params.copy()
+            cluster_model_logger_params["experiment_name"] = f"{cluster_model_logger_params['experiment_name']} submodels"
+            cluster_model_logger_params["run_name"] = f"{cluster_model_logger_params['run_name']} cluster_{i}"
+
+            cluster_model.fit(
+                cluster_train_dataset,
+                val_dataset = cluster_val_dataset,
+                max_epochs = max_epochs,
+                log = log,
+                logger_params = cluster_model_logger_params,
+                random_state = random_state
             )
 
-            trainer = L.Trainer(accelerator=self.tech_params["accelerator"], max_epochs=max_epochs, logger=logger)
+            self.autoencoders.append(cluster_model)
+        
 
-            # for some strange reason, mlflow logger always saves two copies of the checkpoint
-            # First (desired) in mlartifacts folder and the second (unwanted) in the notebook's dir
-            # This is a workaround to gitignore second copy and easily remove it after training 
-            # see https://github.com/Lightning-AI/pytorch-lightning/issues/17904 for more info
-            trainer.checkpoint_callback.dirpath = "bin_for_redundant_checkpoints"
+        if log:
+            metrics = self.evaluate(val_dataset)
 
-            trainer.fit(model, dataloader)
-            self.autoencoders.append(model)
+            mlflow.log_metrics(metrics, run_id=mlflow_run.info.run_id)
+            mlflow.end_run()
+        
 
-    def predict(self, data : torch.utils.data.Dataset):
-        """
-        Predict the labels for the input data.
+    def evaluate(self, dataset):
 
-        Args:
-            data (torch.utils.data.Dataset): dataset to predict.
-
-        Returns:
-            torch.Tensor: The predicted labels.
-        """
-
-        # get the cluster labels for each sample
-        clusters = self.birch.predict(data.x.cpu().numpy())
-
-        dataloader = self._get_loader(data, shuffle=False)
-
-        # make predictions for all samples with each autoencoder
-        independent_predictions = []
-        for model in self.autoencoders:
-            trainer = L.Trainer(accelerator=self.tech_params["accelerator"], logger=False)
-            predictions = trainer.predict(model, dataloader)
-            predictions = torch.cat(predictions, dim=0)
-
-            independent_predictions.append(predictions)
-
-        # for each sample select the prediction of the AE of corresponding cluster
-        predictions = torch.stack(independent_predictions, dim=1)
-        clusters = torch.tensor(clusters, device=predictions.device)
-        predictions = predictions[torch.arange(predictions.size(0)), clusters]
-
-
-        return predictions
-    
-    def predict_anomaly_score(self, data : torch.utils.data.Dataset):
-        """
-        Predict the anomaly score for the input data.
-
-        Args:
-            data (torch.utils.data.Dataset): dataset to predict.
-
-        Returns:
-            torch.Tensor: The predicted anomaly scores.
-        """
-
-        # get the cluster labels for each sample
-        clusters = self.birch.predict(data.x.cpu().numpy())
-
-        dataloader = self._get_loader(data, shuffle=False)
-
-        # make predictions for all samples with each autoencoder
-        independent_predictions = []
-        for model in self.autoencoders:
-            
-            model_mode = model.training
-            model.eval()
-            scores = []
-            with torch.no_grad():
-                for x, y, attack_cat in dataloader:
-                    socre = model.predict_anomaly_score(x)
-                    scores.append(socre.cpu().numpy())
-            scores = torch.tensor(np.concatenate(scores))
-
-            model.train(model_mode)
-
-            independent_predictions.append(scores)
-
-        # for each sample select the prediction of the AE of corresponding cluster
-        predictions = torch.stack(independent_predictions, dim=1)
-        clusters = torch.tensor(clusters, device=predictions.device)
-        predictions = predictions[torch.arange(predictions.size(0)), clusters]
-
-        return predictions
-    
-    def evaluate(self, data : torch.utils.data.Dataset):
-        """
-        Evaluate the model on the input data.
-
-        Metrics:
-            - accuracy
-            - precision
-            - recall
-            - f1 score
-            - auroc
-
-        Args:
-            data (torch.utils.data.Dataset): Dataset to evaluate.
-
-        Returns:
-            dict: The evaluation metrics.
-        """
-
-        preds = self.predict(data)
-        anomaly_scores = self.predict_anomaly_score(data)
-        labels = data.y.clone().detach()
+        preds = self.predict(dataset)
+        anomaly_scores = self.predict_raw(dataset)
+        labels = dataset.y.clone().detach()
 
         accuracy = tmf.binary_accuracy(preds, labels)
         precision = tmf.binary_precision(preds, labels)
@@ -243,55 +164,105 @@ class BAE:
 
 
         metrics = {
-            "accuracy": accuracy,
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
-            "auroc": auroc
+            "test_accuracy": accuracy,
+            "test_precision": precision,
+            "test_recall": recall,
+            "test_f1": f1,
+            "test_auroc": auroc
         }
 
         return metrics
 
+    def predict(self, dataset):
 
+        # get the cluster labels for each sample
+        clusters = self.birch.predict(dataset.x.cpu().numpy())
+
+        # make predictions for all samples with each autoencoder
+        independent_predictions = []
+        for model in self.autoencoders:
+            predictions = model.predict(dataset)
+            independent_predictions.append(predictions)
+
+        # for each sample select the prediction of the AE of corresponding cluster
+        predictions = torch.stack(independent_predictions, dim=1)
+        clusters = torch.tensor(clusters, device=predictions.device)
+        predictions = predictions[torch.arange(predictions.size(0)), clusters]
+
+        return predictions
     
-    def _get_filtered_loader(self, 
+    def predict_raw(self, dataset):
+
+        # get the cluster labels for each sample
+        clusters = self.birch.predict(dataset.x.cpu().numpy())
+
+        # make predictions for all samples with each autoencoder
+        independent_predictions = []
+        for model in self.autoencoders:
+            predictions = model.predict_raw(dataset)
+            independent_predictions.append(predictions)
+
+        # for each sample select the prediction of the AE of corresponding cluster
+        predictions = torch.stack(independent_predictions, dim=1)
+        clusters = torch.tensor(clusters, device=predictions.device)
+        predictions = predictions[torch.arange(predictions.size(0)), clusters]
+
+        return predictions
+    
+    def save(self, path = None):
+        
+        if path is None:
+            path = self._gen_default_checkpoint_path()
+
+        if not isinstance(path, Path):
+            path = Path(path)
+
+        cluster_models_paths = []
+        model_dir = path.parent
+        filename_stem = path.stem
+        for i, model in enumerate(self.autoencoders):
+            cluster_models_paths.append(model_dir / f"{filename_stem}_cluster_{i}.pt")
+            model.save(cluster_models_paths[-1])
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        torch.save({
+            "birch": self.birch,
+            "cluster_models_paths": cluster_models_paths,
+            "hyper_parameters": self.hparams,
+        }, path)
+
+        return path
+    
+    @staticmethod
+    def load(path):
+        
+        checkpoint = torch.load(path)
+
+        model =  BAE(**checkpoint["hyper_parameters"])
+
+        model.birch = checkpoint["birch"]
+
+        model.autoencoders = []
+        for cluster_model_path in checkpoint["cluster_models_paths"]:
+            model.autoencoders.append(model.base_model.load(cluster_model_path))
+
+        return model
+    
+    def _get_filtered_dataset(self, 
                              dataset : torch.utils.data.Dataset, 
-                             filter : torch.Tensor, 
-                             shuffle : bool = False):
+                             filter : torch.Tensor):
         """ 
-        Create dataloader with samples that satisfy the filter and complies with the technical parameters.
+        Create dataset with samples that match the filter.
 
         Args:
             dataset (torch.utils.data.Dataset): The input dataset.
             filter (torch.Tensor): A boolean tensor to filter the dataset.
-            shuffle (bool): DataLoader shuffle flag.
 
         Returns:
-            DataLoader: DataLoader containing only the filtered samples.
+            filtered_datset (Dataset): Dataset containing only the filtered samples.
         """
         x, y, attack_cat = dataset[filter]
         filtered_dataset = TensorDataset(x, y, attack_cat)
-        filtered_dataloader = self._get_loader(filtered_dataset, shuffle=shuffle)
 
-        return filtered_dataloader
-    
-    def _get_loader(self, 
-                    dataset : torch.utils.data.Dataset, 
-                    shuffle : bool = False):
-        """ 
-        Create dataloader that complies with the technical parameters.
-
-        Args:
-            dataset (torch.utils.data.Dataset): The input dataset.
-            shuffle (bool): DataLoader shuffle flag.
-
-        Returns:
-            DataLoader: DataLoader containing only the filtered samples.
-        """
-        dataloader = DataLoader(dataset, 
-                                batch_size = self.tech_params["batch_size"], 
-                                shuffle = shuffle, 
-                                num_workers = self.tech_params["num_workers"], 
-                                persistent_workers = self.tech_params["persistent_workers"])
-
-        return dataloader
+        return filtered_dataset
