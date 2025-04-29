@@ -87,6 +87,8 @@ class BAE(IADModel):
             mlflow_run = mlflow.start_run(run_name=logger_params["run_name"])
             mlflow.log_params(self.hparams | {"base_model" : self.base_model.__name__}, run_id=mlflow_run.info.run_id)
             mlflow.log_params(logger_params["tags"], run_id=mlflow_run.info.run_id)
+            mlflow.log_param("model", self.__class__.__name__, run_id=mlflow_run.info.run_id)
+            mlflow.log_param("max_epochs", max_epochs, run_id=mlflow_run.info.run_id)
 
         # select a sample of the data to fit the birch model
         # birch is trained on a sample of the data to speed up the process
