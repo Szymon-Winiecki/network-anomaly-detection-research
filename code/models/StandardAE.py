@@ -1,4 +1,3 @@
-from datetime import datetime
 from pathlib import Path
 
 import lightning as L
@@ -25,7 +24,8 @@ class StandardAE(L.LightningModule, IADModel):
                  initial_lr : float = 1e-3, 
                  linear_lr_start_factor : float = 1.0, 
                  linear_lr_end_factor : float = 0.1, 
-                 linear_lr_total_iters : int = 100):
+                 linear_lr_total_iters : int = 100,
+                 threshold_quantile : float = 0.9):
         """ Standard autoencoder model to make predicions based on reconstruction error
 
         Args:
@@ -37,6 +37,7 @@ class StandardAE(L.LightningModule, IADModel):
             linear_lr_start_factor (float, optional): Start factor for the linear learning rate scheduler. Defaults to 1.
             linear_lr_end_factor (float, optional): End factor for the linear learning rate scheduler. Defaults to 0.1.
             linear_lr_total_iters (int, optional): Total iterations (num epochs) for the linear learning rate scheduler. Defaults to 100.
+            threshold_quantile (float, optional): Detection threshold is set to the quantile of the training losses. Defaults to 0.9.
         """
 
         super().__init__()
@@ -53,6 +54,8 @@ class StandardAE(L.LightningModule, IADModel):
         self.linear_lr_start_factor = linear_lr_start_factor
         self.linear_lr_end_factor = linear_lr_end_factor
         self.linear_lr_total_iters = linear_lr_total_iters
+
+        self.threshold_quantile = threshold_quantile
 
         self.encoder = self._build_encoder()
 
@@ -132,7 +135,7 @@ class StandardAE(L.LightningModule, IADModel):
     def on_train_epoch_end(self):
         losses = torch.cat(self.train_step_losses)
 
-        self.threshold = losses.quantile(0.9)
+        self.threshold = losses.quantile(self.threshold_quantile)
 
         self.log("train_loss", losses.mean())
         self.log("train_loss_std", losses.std())

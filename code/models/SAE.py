@@ -43,6 +43,7 @@ class SAE(L.LightningModule, IADModel):
                  linear_lr_total_iters : int = 100,
                  fit_occ_once : bool = False,
                  occ_algorithm : str = "centroid",
+                 threshold_quantile : float = 0.9,
                  occ_fit_sample_size : int | float = 1.0,
                  *occ_args,
                  **occ_kwargs) -> None:
@@ -60,6 +61,7 @@ class SAE(L.LightningModule, IADModel):
             fit_occ_once (bool, optional): if False, the model will fit the OCC algorithm every epoch. If True, the model will fit the OCC algorithm only once, at the end of the training, it also results in no validation metrics from non-last epochs. Defaults to False.
             occ_algorithm (str, optional): OCC algorithm to use. Supported algorithms are: centroid, lof, svm, re. Defaults to "centroid".
                 re (reconstruction error) is a special case, where the model uses the reconstruction error as the anomaly score and the threshold is calculated based on the training set (not an occ).
+            threshold_quantile (float, optional): The quantile to use for the threshold calculation in case of "centroid" and "re" algorithms. Defaults to 0.9.
             occ_fit_sample_size (int | float, optional): If int, the number of samples to use for fitting the OCC algorithm. If float, the percentage of samples to use for fitting the OCC algorithm. Defaults to 1.0 (full training dataset).
             *occ_args: Additional arguments for the OCC algorithm.
             **occ_kwargs: Additional keyword arguments for the OCC algorithm.
@@ -82,6 +84,7 @@ class SAE(L.LightningModule, IADModel):
         self.linear_lr_end_factor = linear_lr_end_factor
         self.linear_lr_total_iters = linear_lr_total_iters
 
+        self.threshold_quantile = threshold_quantile
         self.fit_occ_once = fit_occ_once
         self.occ_fit_sample_size = occ_fit_sample_size
 
@@ -185,7 +188,7 @@ class SAE(L.LightningModule, IADModel):
         # special case for detection based on reconstruction error (re)
         if self.occ_algorithm == "re":
             re_loss = torch.cat(self.train_step_re_losss)
-            self.threshold = re_loss.quantile(0.9)
+            self.threshold = re_loss.quantile(self.threshold_quantile)
             self.log("re_threshold", self.threshold)
         
         elif self._if_fit_occ_this_epoch():
@@ -194,7 +197,7 @@ class SAE(L.LightningModule, IADModel):
 
             if self.occ_algorithm == "centroid":
                 anomaly_scores = self._calc_anomaly_score(latents)
-                self.cen_dst_threshold = anomaly_scores.quantile(0.9)
+                self.cen_dst_threshold = anomaly_scores.quantile(self.threshold_quantile)
                 self.log("cen_dst_threshold", self.cen_dst_threshold)
             elif self.occ_algorithm == "lof":
                 self.log("lof_offset", self.classifier.offset_)
@@ -533,7 +536,7 @@ class SAE(L.LightningModule, IADModel):
     
     def _prepare_occ(self, occ_algorithm, *occ_args, **occ_kwargs):
         self.occ_algorithm = occ_algorithm
-        
+
         if occ_algorithm == "centroid":
             self.classifier = GaussianMixture(n_components = 1, *occ_args, **occ_kwargs)
             self.cen_dst_threshold = 0
