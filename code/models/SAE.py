@@ -1,4 +1,4 @@
-from abc import ABCMeta, abstractmethod
+from pathlib import Path
 
 import lightning as L
 from lightning.pytorch.loggers import MLFlowLogger
@@ -52,13 +52,14 @@ class SAE(L.LightningModule, IADModel):
             hidden_sizes (list): List of sizes of the hidden layers of encoder, last element is the size of the bottleneck layer. Decoder will have the same hidden sizes in reverse order. 
             dropout (False | float, optional): If float, it will be used as the dropout rate. If False no dropout layers are used. Defaults to False. Float 0.0 is treated as False.
             batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
-            lmb (float, optional): Balance parameter for the SAE loss. Defaults to 0.1.
+            lmb (float, optional): Balance parameter for the SAE loss (relative importance of shrinking part). Defaults to 0.1.
             initial_lr (float, optional): Initial learning rate. Defaults to 1e-3.
             linear_lr_start_factor (float, optional): Start factor for the linear learning rate scheduler. Defaults to 1.
             linear_lr_end_factor (float, optional): End factor for the linear learning rate scheduler. Defaults to 0.1.
             linear_lr_total_iters (int, optional): Total iterations (num epochs) for the linear learning rate scheduler. Defaults to 100.
             fit_occ_once (bool, optional): if False, the model will fit the OCC algorithm every epoch. If True, the model will fit the OCC algorithm only once, at the end of the training, it also results in no validation metrics from non-last epochs. Defaults to False.
-            occ_algorithm (str, optional): OCC algorithm to use. Supported algorithms are: centroid, lof, svm. Defaults to "centroid".
+            occ_algorithm (str, optional): OCC algorithm to use. Supported algorithms are: centroid, lof, svm, re. Defaults to "centroid".
+                re (reconstruction error) is a special case, where the model uses the reconstruction error as the anomaly score and the threshold is calculated based on the training set (not an occ).
             occ_fit_sample_size (int | float, optional): If int, the number of samples to use for fitting the OCC algorithm. If float, the percentage of samples to use for fitting the OCC algorithm. Defaults to 1.0 (full training dataset).
             *occ_args: Additional arguments for the OCC algorithm.
             **occ_kwargs: Additional keyword arguments for the OCC algorithm.
@@ -73,7 +74,8 @@ class SAE(L.LightningModule, IADModel):
         self.dropout = dropout
         self.batch_norm = batch_norm
 
-        self.lmb = lmb
+        self.shrink_weight = lmb / (1 + lmb) # shrink weight for the SAE loss
+        self.re_weight = 1 - self.shrink_weight # reconstruction error weight for the SAE loss
         
         self.initial_lr = initial_lr
         self.linear_lr_start_factor = linear_lr_start_factor
@@ -81,29 +83,18 @@ class SAE(L.LightningModule, IADModel):
         self.linear_lr_total_iters = linear_lr_total_iters
 
         self.fit_occ_once = fit_occ_once
-        self.occ_algorithm = occ_algorithm
         self.occ_fit_sample_size = occ_fit_sample_size
 
         self.encoder = self._build_encoder()
 
         self.decoder = self._build_decoder()
 
-        if occ_algorithm == "centroid":
-            self.classifier = GaussianMixture(n_components = 1, *occ_args, **occ_kwargs)
-            self.cen_dst_threshold = 0
-        elif occ_algorithm == "lof":
-            self.classifier = LocalOutlierFactor(novelty=True, *occ_args, **occ_kwargs)
-        elif occ_algorithm == "svm":
-            self.classifier = OneClassSVM(kernel="rbf", gamma="scale", nu=0.1, shrinking=True)
-            raise NotImplementedError("SVM is not implemented yet.")
-        else:
-            raise ValueError(f"Unknown OCC algorithm: {occ_algorithm}. Supported algorithms are: centroid, lof, svm.")
-
-        self.classifier.fit(np.zeros((2, hidden_sizes[-1])))  # Dummy fit to initialize the classifier
-
+        self._prepare_occ(occ_algorithm, *occ_args, **occ_kwargs)
 
         # store the latents of each sample to train the classifier
         self.train_step_latents = []
+        # store the losses of each sample if method is "re" to calculate re detection threshold
+        self.train_step_re_losss = []
 
         # Store the losses of each sample in each train step in epoch
         # to compute anomaly detection threshold
@@ -171,11 +162,16 @@ class SAE(L.LightningModule, IADModel):
         x_recon = self.decoder(x_latent)
 
         # SAE loss: reconstruction loss + l2 regularization (vector norm)
-        loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1) + self.lmb * torch.linalg.vector_norm(x_latent, ord=2, dim=1)
+        re_loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+        shrink_loss = torch.linalg.vector_norm(x_latent, ord=2, dim=1) ** 2
+        loss = self.re_weight * re_loss + self.shrink_weight * shrink_loss
         loss = F.tanh(loss)
 
         self.train_step_latents.append(x_latent)
         self.train_step_losses.append(loss)
+
+        if self.occ_algorithm == "re":
+            self.train_step_re_losss.append(F.tanh(re_loss))
 
         loss = loss.mean()
 
@@ -185,28 +181,19 @@ class SAE(L.LightningModule, IADModel):
 
         latents = torch.cat(self.train_step_latents)
         losses = torch.cat(self.train_step_losses)
+
+        # special case for detection based on reconstruction error (re)
+        if self.occ_algorithm == "re":
+            re_loss = torch.cat(self.train_step_re_losss)
+            self.threshold = re_loss.quantile(0.9)
+            self.log("re_threshold", self.threshold)
         
-        if self._if_fit_occ_this_epoch():
+        elif self._if_fit_occ_this_epoch():
             
-            fit_sample = None
-            if self.occ_fit_sample_size == 1.0:
-                fit_sample = latents
-            elif isinstance(self.occ_fit_sample_size, int):
-                fit_sample_size = min(self.occ_fit_sample_size, latents.shape[0])
-            elif isinstance(self.occ_fit_sample_size, float):
-                fit_sample_size = int(self.occ_fit_sample_size * latents.shape[0])
-            
-            if not fit_sample:
-                rng = np.random.default_rng()
-                fit_sample_indices = rng.choice(latents.shape[0], size=fit_sample_size, replace=False)
-                fit_sample = latents[fit_sample_indices].detach().cpu().numpy()
-
-
-            self.classifier.fit(fit_sample)
-
-            anomaly_scores = self._calc_anomaly_score(latents)
+            self._fit_occ(latents)
 
             if self.occ_algorithm == "centroid":
+                anomaly_scores = self._calc_anomaly_score(latents)
                 self.cen_dst_threshold = anomaly_scores.quantile(0.9)
                 self.log("cen_dst_threshold", self.cen_dst_threshold)
             elif self.occ_algorithm == "lof":
@@ -221,10 +208,24 @@ class SAE(L.LightningModule, IADModel):
 
         self.train_step_latents.clear()
         self.train_step_losses.clear()
+        self.train_step_re_losss.clear()
 
     def validation_step(self, batch, batch_idx):
+        
+        if self.occ_algorithm == "re":
+            x, y , attack_cat = batch
+            x_recon = self.forward(x)
 
-        if self._if_val_occ_this_epoch():
+            anomaly_score = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+            anomaly_score = F.tanh(anomaly_score)
+
+            preds = anomaly_score > self.threshold
+
+            self.validation_step_scores.append(anomaly_score)
+            self.validation_step_preds.append(preds)
+            self.validation_step_labels.append(y)
+
+        elif self._if_val_occ_this_epoch():
             x, y, attack_cat = batch
             x_latent = self.encoder(x)
 
@@ -239,7 +240,8 @@ class SAE(L.LightningModule, IADModel):
     
     def on_validation_epoch_end(self):
         
-        if self._if_val_occ_this_epoch():
+
+        if self.occ_algorithm == "re" or self._if_val_occ_this_epoch():
             # Concatenate all losses and labels of the samples in the validation step
             anomaly_scores = torch.cat(self.validation_step_scores)
             preds = torch.cat(self.validation_step_preds)
@@ -267,10 +269,20 @@ class SAE(L.LightningModule, IADModel):
 
     def test_step(self, batch, batch_idx):
         x, y, attack_cat = batch
-        x_latent = self.encoder(x)
 
-        anomaly_score = self._calc_anomaly_score(x_latent)
-        preds = self._calc_predictions(x_latent)
+        if self.occ_algorithm == "re":
+            x_recon = self.forward(x)
+
+            anomaly_score = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+            anomaly_score = F.tanh(anomaly_score)
+
+            preds = anomaly_score > self.threshold
+
+        else:
+            x_latent = self.encoder(x)
+
+            anomaly_score = self._calc_anomaly_score(x_latent)
+            preds = self._calc_predictions(x_latent)
 
         self.test_step_socores.append(anomaly_score)
         self.test_step_preds.append(preds)
@@ -419,11 +431,11 @@ class SAE(L.LightningModule, IADModel):
         return predictions
 
     def save(self, path):
-        pass
+        raise NotImplementedError("Save method not implemented")
 
     @staticmethod
     def load(path):
-        pass
+        raise NotImplementedError("Load method not implemented")
 
     def plot_latent_space(self, dataset, save_path=None):
         """ Plot the latent space of the model
@@ -477,6 +489,10 @@ class SAE(L.LightningModule, IADModel):
             score = self.classifier.decision_function(x_latent.detach().cpu().numpy())
             score = torch.tensor(score, dtype=x_latent.dtype).to(x_latent.device)
             score = 1.0 - F.sigmoid(score)
+        elif self.occ_algorithm == "svm":
+            score = self.classifier.decision_function(x_latent.detach().cpu().numpy())
+            score = torch.tensor(score, dtype=x_latent.dtype).to(x_latent.device)
+            score = 1.0 - F.sigmoid(score)
 
         return score
     
@@ -487,6 +503,11 @@ class SAE(L.LightningModule, IADModel):
             preds = torch.tensor(cen_distance, dtype=x_latent.dtype).to(x_latent.device) 
             preds = F.tanh(preds) > self.cen_dst_threshold
         elif self.occ_algorithm == "lof":
+            preds = self.classifier.predict(x_latent.detach().cpu().numpy())
+            preds[preds == 1] = 0
+            preds[preds == -1] = 1
+            preds = torch.tensor(preds, dtype=x_latent.dtype).to(x_latent.device)
+        elif self.occ_algorithm == "svm":
             preds = self.classifier.predict(x_latent.detach().cpu().numpy())
             preds[preds == 1] = 0
             preds[preds == -1] = 1
@@ -509,3 +530,37 @@ class SAE(L.LightningModule, IADModel):
             return True
         
         return False
+    
+    def _prepare_occ(self, occ_algorithm, *occ_args, **occ_kwargs):
+        self.occ_algorithm = occ_algorithm
+        
+        if occ_algorithm == "centroid":
+            self.classifier = GaussianMixture(n_components = 1, *occ_args, **occ_kwargs)
+            self.cen_dst_threshold = 0
+        elif occ_algorithm == "lof":
+            self.classifier = LocalOutlierFactor(novelty=True, *occ_args, **occ_kwargs)
+        elif occ_algorithm == "svm":
+            self.classifier = OneClassSVM(*occ_args, **occ_kwargs)
+        elif occ_algorithm == "re":
+            self.threshold = 0
+        else:
+            raise ValueError(f"Unknown OCC algorithm: {occ_algorithm}. Supported algorithms are: centroid, lof, svm, re.")
+
+        if occ_algorithm != "re":
+            self.classifier.fit(np.zeros((2, self.hidden_sizes[-1])))  # Dummy fit to initialize the classifier
+    
+    def _fit_occ(self, latents):
+        fit_sample = None
+        if self.occ_fit_sample_size == 1.0:
+            fit_sample = latents.detach().cpu().numpy()
+        elif isinstance(self.occ_fit_sample_size, int):
+            fit_sample_size = min(self.occ_fit_sample_size, latents.shape[0])
+        elif isinstance(self.occ_fit_sample_size, float):
+            fit_sample_size = int(self.occ_fit_sample_size * latents.shape[0])
+        
+        if fit_sample is None:
+            rng = np.random.default_rng()
+            fit_sample_indices = rng.choice(latents.shape[0], size=fit_sample_size, replace=False)
+            fit_sample = latents[fit_sample_indices].detach().cpu().numpy()
+
+        self.classifier.fit(fit_sample)
