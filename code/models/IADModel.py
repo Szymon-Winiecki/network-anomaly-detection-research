@@ -129,3 +129,9 @@ class IADModel(ABC):
         Generate default and unique path to save the model checkpoint.
         """
         return Path(self.default_model_save_dir) / f"{self.__class__.__name__}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')}.pt"
+    
+
+def _init_weights_xavier_uniform(layer):
+    if isinstance(layer, torch.nn.Linear):
+        torch.nn.init.xavier_uniform_(layer.weight)
+        layer.bias.data.fill_(0.01)

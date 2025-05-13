@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import LinearLR
 # import torcheval.metrics.functional as tmf
 import torchmetrics.functional as tmf
 
-from IADModel import IADModel
+from IADModel import IADModel, _init_weights_xavier_uniform
 
 class AE(L.LightningModule, IADModel):
     """ Standard autoencoder model to make predicions based on reconstruction error """
@@ -82,12 +82,14 @@ class AE(L.LightningModule, IADModel):
             encoder.append(nn.Linear(input_size, hidden_size))
             if self.batch_norm:
                 encoder.append(nn.BatchNorm1d(hidden_size))
-            encoder.append(nn.ReLU())
+            encoder.append(nn.Tanh())
             if self.dropout:
                 encoder.append(nn.Dropout(self.dropout))
             input_size = hidden_size
 
         encoder.append(nn.Linear(input_size, self.hidden_sizes[-1]))
+
+        encoder.apply(_init_weights_xavier_uniform)
 
         return encoder
     
@@ -98,12 +100,14 @@ class AE(L.LightningModule, IADModel):
             decoder.append(nn.Linear(input_size, hidden_size))
             if self.batch_norm:
                 decoder.append(nn.BatchNorm1d(hidden_size))
-            decoder.append(nn.ReLU())
+            decoder.append(nn.Tanh())
             if self.dropout:
                 decoder.append(nn.Dropout(self.dropout))
             input_size = hidden_size
 
         decoder.append(nn.Linear(input_size, self.input_size))
+        
+        decoder.apply(_init_weights_xavier_uniform)
 
         return decoder
 
@@ -124,9 +128,8 @@ class AE(L.LightningModule, IADModel):
         x, _, _ = batch
         x_recon = self.forward(x)
         loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-        loss = F.tanh(loss)
 
-        self.train_step_losses.append(loss)
+        self.train_step_losses.append(loss.detach().clone())
 
         loss = loss.mean()
 
@@ -153,7 +156,6 @@ class AE(L.LightningModule, IADModel):
         x_recon = self.forward(x)
 
         loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-        loss = F.tanh(loss)
             
         self.validation_step_losses.append(loss)
         self.validation_step_labels.append(y)
@@ -171,7 +173,7 @@ class AE(L.LightningModule, IADModel):
         precision = tmf.precision(preds, labels, task="binary")
         recall = tmf.recall(preds, labels, task="binary")
         f1 = tmf.f1_score(preds, labels, task="binary")
-        auroc = tmf.auroc(losses, labels, task="binary")
+        auroc = tmf.auroc(F.tanh(losses), labels, task="binary") # tanh to transform losses form (0, inf) to (0,1) range (for AUROC metric)
 
         self.log("val_accuracy", accuracy)
         self.log("val_precision", precision)
@@ -191,7 +193,6 @@ class AE(L.LightningModule, IADModel):
         x_recon = self.forward(x)
 
         loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-        loss = F.tanh(loss)
 
         self.test_step_losses.append(loss)
         self.test_step_labels.append(y)
@@ -209,7 +210,7 @@ class AE(L.LightningModule, IADModel):
         precision = tmf.precision(preds, labels, task="binary")
         recall = tmf.recall(preds, labels, task="binary")
         f1 = tmf.f1_score(preds, labels, task="binary")
-        auroc = tmf.auroc(losses, labels, task="binary")
+        auroc = tmf.auroc(F.tanh(losses), labels, task="binary")
 
         self.log("test_accuracy", accuracy)
         self.log("test_precision", precision)
@@ -225,7 +226,6 @@ class AE(L.LightningModule, IADModel):
         x, _, _ = batch
         x_recon = self.forward(x)
         loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-        loss = F.tanh(loss)
         pred = loss > self.threshold
         return pred
 
@@ -241,14 +241,6 @@ class AE(L.LightningModule, IADModel):
                 "frequency": 1,
             },
         }
-
-    def predict_anomaly_score(self, x):
-        
-        x_recon = self.forward(x)
-        loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-        loss = F.tanh(loss)
-
-        return loss
     
     def adjust_threshold(self, score, y):
         """
@@ -329,7 +321,6 @@ class AE(L.LightningModule, IADModel):
                 x = x.to(device=self.device)
                 x_recon = self.forward(x)
                 loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-                loss = F.tanh(loss)
                 pred = loss > self.threshold
 
                 predictions.append(pred)
@@ -356,7 +347,6 @@ class AE(L.LightningModule, IADModel):
                 x = x.to(device=self.device)
                 x_recon = self.forward(x)
                 loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-                loss = F.tanh(loss)
 
                 scores.append(loss)
 
@@ -388,7 +378,7 @@ class AE(L.LightningModule, IADModel):
     def load(path):
         
         checkpoint = torch.load(path)
-        model = StandardAE(**checkpoint["hyper_parameters"])
+        model = AE(**checkpoint["hyper_parameters"])
         model.load_state_dict(checkpoint["state_dict"])
         model.threshold = checkpoint["threshold"]
 

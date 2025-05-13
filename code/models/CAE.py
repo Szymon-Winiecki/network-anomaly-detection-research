@@ -14,7 +14,7 @@ from sklearn.decomposition import PCA
 
 import matplotlib.pyplot as plt
 
-from IADModel import IADModel
+from IADModel import IADModel, _init_weights_xavier_uniform
 
 class CAE(L.LightningModule, IADModel):
     """ Clustering-based Deep Autoencoder (CAE)
@@ -98,13 +98,7 @@ class CAE(L.LightningModule, IADModel):
         self.test_step_clusters = []
 
 
-    def _init_weights(self, layer):
-        if isinstance(layer, nn.Linear):
-            torch.nn.init.xavier_uniform_(layer.weight)
-            layer.bias.data.fill_(0.01)
-
     def _build_encoder(self):
-        """ Create the encoder NN here """
         encoder = nn.Sequential()
         input_size = self.input_size
         for hidden_size in self.hidden_sizes[:-1]:
@@ -116,8 +110,9 @@ class CAE(L.LightningModule, IADModel):
                 encoder.append(nn.Dropout(self.dropout))
             input_size = hidden_size
 
-        encoder.apply(self._init_weights)
         encoder.append(nn.Linear(input_size, self.hidden_sizes[-1]))
+
+        encoder.apply(_init_weights_xavier_uniform)
 
         return encoder
     
@@ -128,13 +123,14 @@ class CAE(L.LightningModule, IADModel):
             decoder.append(nn.Linear(input_size, hidden_size))
             if self.batch_norm:
                 decoder.append(nn.BatchNorm1d(hidden_size))
-            decoder.append(nn.ReLU())
+            decoder.append(nn.Tanh())
             if self.dropout:
                 decoder.append(nn.Dropout(self.dropout))
             input_size = hidden_size
 
-        decoder.apply(self._init_weights)
         decoder.append(nn.Linear(input_size, self.input_size))
+
+        decoder.apply(_init_weights_xavier_uniform)
 
         return decoder
 

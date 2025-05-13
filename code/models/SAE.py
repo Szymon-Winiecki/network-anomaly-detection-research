@@ -20,7 +20,7 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
-from IADModel import IADModel
+from IADModel import IADModel, _init_weights_xavier_uniform
 
 class SAE(L.LightningModule, IADModel):
     """ Shrink Autoencoder model 
@@ -121,12 +121,14 @@ class SAE(L.LightningModule, IADModel):
             encoder.append(nn.Linear(input_size, hidden_size))
             if self.batch_norm:
                 encoder.append(nn.BatchNorm1d(hidden_size))
-            encoder.append(nn.ReLU())
+            encoder.append(nn.Tanh())
             if self.dropout:
                 encoder.append(nn.Dropout(self.dropout))
             input_size = hidden_size
-
+        
         encoder.append(nn.Linear(input_size, self.hidden_sizes[-1]))
+
+        encoder.apply(_init_weights_xavier_uniform)
 
         return encoder
     
@@ -137,12 +139,14 @@ class SAE(L.LightningModule, IADModel):
             decoder.append(nn.Linear(input_size, hidden_size))
             if self.batch_norm:
                 decoder.append(nn.BatchNorm1d(hidden_size))
-            decoder.append(nn.ReLU())
+            decoder.append(nn.Tanh())
             if self.dropout:
                 decoder.append(nn.Dropout(self.dropout))
             input_size = hidden_size
 
         decoder.append(nn.Linear(input_size, self.input_size))
+
+        decoder.apply(_init_weights_xavier_uniform)
 
         return decoder
 
@@ -168,13 +172,12 @@ class SAE(L.LightningModule, IADModel):
         re_loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
         shrink_loss = torch.linalg.vector_norm(x_latent, ord=2, dim=1) ** 2
         loss = self.re_weight * re_loss + self.shrink_weight * shrink_loss
-        loss = F.tanh(loss)
 
-        self.train_step_latents.append(x_latent)
-        self.train_step_losses.append(loss)
+        self.train_step_latents.append(x_latent.detach().clone())
+        self.train_step_losses.append(loss.detach().clone())
 
         if self.occ_algorithm == "re":
-            self.train_step_re_losss.append(F.tanh(re_loss))
+            self.train_step_re_losss.append(re_loss.detach().clone())
 
         loss = loss.mean()
 
@@ -220,7 +223,6 @@ class SAE(L.LightningModule, IADModel):
             x_recon = self.forward(x)
 
             anomaly_score = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-            anomaly_score = F.tanh(anomaly_score)
 
             preds = anomaly_score > self.threshold
 
@@ -254,7 +256,11 @@ class SAE(L.LightningModule, IADModel):
             precision = tmf.precision(preds, labels, task="binary")
             recall = tmf.recall(preds, labels, task="binary")
             f1 = tmf.f1_score(preds, labels, task="binary")
-            auroc = tmf.auroc(anomaly_scores, labels, task="binary")
+
+            if self.occ_algorithm == "re":
+                auroc = tmf.auroc(F.tanh(anomaly_scores), labels, task="binary")
+            else:
+                auroc = tmf.auroc(anomaly_scores, labels, task="binary")
 
             self.log("val_accuracy", accuracy)
             self.log("val_precision", precision)
@@ -277,7 +283,6 @@ class SAE(L.LightningModule, IADModel):
             x_recon = self.forward(x)
 
             anomaly_score = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-            anomaly_score = F.tanh(anomaly_score)
 
             preds = anomaly_score > self.threshold
 
