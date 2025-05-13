@@ -13,7 +13,7 @@ import torchmetrics.functional as tmf
 
 from IADModel import IADModel
 
-class StandardAE(L.LightningModule, IADModel):
+class AE(L.LightningModule, IADModel):
     """ Standard autoencoder model to make predicions based on reconstruction error """
 
     def __init__(self, 
