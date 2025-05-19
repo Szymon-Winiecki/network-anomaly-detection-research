@@ -7,7 +7,6 @@ from torch import tensor
 from torch.utils.data import Dataset
 
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split
 
 this_directory = Path(__file__).parent.resolve()
 sys.path.append(str(this_directory / '../utils'))
@@ -17,11 +16,6 @@ class CICIDS2017Dataset(Dataset):
 
     # debug flag to print dataset statistics
     DEBUG = True
-
-    # number of anomaly an normal records to be placed in the validation set
-    # identical proportions to the ones in the test set
-    VAL_NUM_ANOMALIES = 278823
-    VAL_NUM_NORMAL = 278823
 
     def __init__(self, 
                  root_dir: str | Path, 
@@ -39,7 +33,10 @@ class CICIDS2017Dataset(Dataset):
         if not isinstance(root_dir, Path):
             root_dir = Path(root_dir)
 
-        self.dir = root_dir / ("test" if type == "test" else "train")
+        if type not in ["train", "val", "test"]:
+            raise ValueError(f"Invalid type: {type}. Expected 'train', 'val' or 'test'.")
+
+        self.dir = root_dir / type
         self.type = type
 
         # Load label encoder
@@ -47,31 +44,6 @@ class CICIDS2017Dataset(Dataset):
 
         # Load preprocessed data
         data = load_preprocessed_data(self.dir)
-
-
-        if type == "train":
-            # remove attack records, as we need to train on normal data only
-            data = data[data["label"] == 0]
-
-            # separete validation records from training records
-            data, val = train_test_split(data, test_size=CICIDS2017Dataset.VAL_NUM_NORMAL, random_state=random_state)
-        if type == "val":
-            
-            anomalies = data[data["label"] == 1]
-            normal = data[data["label"] == 0]
-
-            # select appriopriate number of anomaly records
-            anomalies = anomalies.sample(n=CICIDS2017Dataset.VAL_NUM_ANOMALIES, random_state=random_state)
-
-            # separate normal validation records from training records
-            train, normal = train_test_split(normal, test_size=CICIDS2017Dataset.VAL_NUM_NORMAL, random_state=random_state)
-
-            # concatenate normal and anomaly records
-            data = pd.concat([normal, anomalies], axis=0)
-            
-        elif type == "test":
-            # there is no need to split test data
-            pass
 
         if CICIDS2017Dataset.DEBUG:
             print(f"\nLoaded {type} data with {len(data)} samples.")

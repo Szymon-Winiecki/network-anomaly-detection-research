@@ -81,7 +81,7 @@ for subfolder in subfolders_to_process:
         print("Class distribution:")
         print(data["label"].value_counts())
 
-    # create attack_cat column - same as label for now
+    # create attack_cat column - same as label in this case
     data["attack_cat"] = data["Label"].apply(lambda x: 1 if "botnet" in x.lower() else 0)
 
     # remove Label (note capital L) column
@@ -89,18 +89,6 @@ for subfolder in subfolders_to_process:
 
     # drop identyfying or unnecessary columns
     data = data.drop(columns=["StartTime", "SrcAddr", "DstAddr"])
-
-    # encode featres
-
-    one_hot_encoder = ColumnTransformer(
-        transformers=[
-            ("categorical", OneHotEncoder(sparse_output=False, handle_unknown='ignore', drop='if_binary'), ["Proto", "Dir", "State", "sTos", "dTos"]),
-        ],
-        remainder="passthrough",
-        verbose_feature_names_out=False,
-    ).set_output(transform="pandas")
-
-    data = one_hot_encoder.fit_transform(data)
 
     # encode attack_cat
 
@@ -139,13 +127,27 @@ for subfolder in subfolders_to_process:
     val_df = pd.concat([val_normal_df, val_attack_df], axis=0)
     test_df = pd.concat([test_normal_df, test_attack_df], axis=0)
 
+    # encode featres
+
+    one_hot_encoder = ColumnTransformer(
+        transformers=[
+            ("categorical", OneHotEncoder(sparse_output=False, handle_unknown='ignore', drop='if_binary'), ["Proto", "Dir", "State", "sTos", "dTos"]),
+        ],
+        remainder="passthrough",
+        verbose_feature_names_out=False,
+    ).set_output(transform="pandas")
+
+    train_df = one_hot_encoder.fit_transform(train_df)
+    val_df = one_hot_encoder.transform(val_df)
+    test_df = one_hot_encoder.transform(test_df)
+
     # save the processed data
     save_preprocessed_data(
         train_df, 
         dir = processed_data_root / subfolder / "train", 
         filename_prefix = f"CTU13-{subfolder}_train", 
         label_encoder = label_encoder, 
-        num_files = 10
+        num_files = 2
     )
 
     save_preprocessed_data(
@@ -153,7 +155,7 @@ for subfolder in subfolders_to_process:
         dir = processed_data_root / subfolder / "val", 
         filename_prefix = f"CTU13-{subfolder}_val", 
         label_encoder = label_encoder, 
-        num_files = 10
+        num_files = 2
     )
 
     save_preprocessed_data(
@@ -161,7 +163,7 @@ for subfolder in subfolders_to_process:
         dir = processed_data_root / subfolder / "test", 
         filename_prefix = f"CTU13-{subfolder}_test", 
         label_encoder = label_encoder, 
-        num_files = 10
+        num_files = 2
     )
 
     

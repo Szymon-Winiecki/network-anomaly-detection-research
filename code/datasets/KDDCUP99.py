@@ -39,7 +39,10 @@ class KDDCUP99Dataset(Dataset):
         if not isinstance(root_dir, Path):
             root_dir = Path(root_dir)
 
-        self.dir = root_dir / ("test" if type == "test" else "train")
+        if type not in ["train", "val", "test"]:
+            raise ValueError(f"Invalid type: {type}. Expected 'train', 'val' or 'test'.")
+
+        self.dir = root_dir / type
         self.type = type
 
         # Load label encoder
@@ -47,31 +50,6 @@ class KDDCUP99Dataset(Dataset):
 
         # Load preprocessed data
         data = load_preprocessed_data(self.dir)
-
-
-        if type == "train":
-            # remove attack records, as we need to train on normal data only
-            data = data[data["label"] == 0]
-
-            # separete validation records from training records
-            data, val = train_test_split(data, test_size=KDDCUP99Dataset.VAL_NUM_NORMAL, random_state=random_state)
-        if type == "val":
-            
-            anomalies = data[data["label"] == 1]
-            normal = data[data["label"] == 0]
-
-            # select appriopriate number of anomaly records
-            anomalies = anomalies.sample(n=KDDCUP99Dataset.VAL_NUM_ANOMALIES, random_state=random_state)
-
-            # separate normal validation records from training records
-            train, normal = train_test_split(normal, test_size=KDDCUP99Dataset.VAL_NUM_NORMAL, random_state=random_state)
-
-            # concatenate normal and anomaly records
-            data = pd.concat([normal, anomalies], axis=0)
-            
-        elif type == "test":
-            # there is no need to split test data
-            pass
 
         if KDDCUP99Dataset.DEBUG:
             print(f"\nLoaded {type} data with {len(data)} samples.")
