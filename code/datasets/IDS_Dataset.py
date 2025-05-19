@@ -1,8 +1,6 @@
 import sys
 from pathlib import Path
 
-import pandas as pd
-
 from torch import tensor
 from torch.utils.data import Dataset
 
@@ -12,7 +10,7 @@ this_directory = Path(__file__).parent.resolve()
 sys.path.append(str(this_directory / '../utils'))
 from dataset_utils import load_preprocessed_data, load_label_encoder
 
-class CICIDS2017Dataset(Dataset):
+class IDS_Dataset(Dataset):
 
     # debug flag to print dataset statistics
     DEBUG = True
@@ -20,13 +18,15 @@ class CICIDS2017Dataset(Dataset):
     def __init__(self, 
                  root_dir: str | Path, 
                  type: str = "train", 
+                 name: str = "undefined",
                  transformer : Pipeline | None = None,
                  random_state: int = 42):
-        """CICIDS2017 dataset class.
+        """IDS (intrusion detection system) dataset class.
 
         Args:
-            root_dir (str | Path): Path to the directory with the processed datasets (root dir of test and train sets).
+            root_dir (str | Path): Path to the directory with the processed datasets (root dir of test, train and val sets).
             type (str): Type of the dataset. Can be "train", "val" or "test".
+            name (str): Name of the dataset.
             transformer (Pipeline, optional): Optional transformer to be applied on a sample.
             random_state (int, optional): Random state for reproducibility.
         """
@@ -39,14 +39,19 @@ class CICIDS2017Dataset(Dataset):
         self.dir = root_dir / type
         self.type = type
 
+        self.name = name
+
+        self.random_state = random_state
+
         # Load label encoder
         self.label_encoder = load_label_encoder(self.dir)
 
         # Load preprocessed data
         data = load_preprocessed_data(self.dir)
 
-        if CICIDS2017Dataset.DEBUG:
-            print(f"\nLoaded {type} data with {len(data)} samples.")
+        if IDS_Dataset.DEBUG:
+            print(f"\n{self.name}")
+            print(f"Loaded {type} data with {len(data)} samples.")
             print(f"Data shape: {data.shape}")
             print(f"num_anomalies: {data['label'].sum()}")
             print(f"num_normal: {data[data['label'] == 0].shape[0]}")
