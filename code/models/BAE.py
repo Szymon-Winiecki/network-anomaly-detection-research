@@ -29,8 +29,7 @@ class BAE(IADModel):
                  birch_n_clusters : int, 
                  birch_fit_sample_size : int,
                  birch_fit_quantile : float,
-                 base_model : IADModel, 
-                 *base_model_args, 
+                 base_model : IADModel,
                  **base_model_kwargs):
         """
         Initialize the BAE model.
@@ -42,8 +41,7 @@ class BAE(IADModel):
             birch_fit_sample_size (int): Number of samples to fit the BIRCH model. Samples are randomly selected from the data.
             birch_fit_quantile (float): Quantile to determine the outlier threshold for samples. 
                 BIRCH is trained on samples with a magnitude lower than the threshold, to prevent outliers from affecting the clustering.
-            base_model (LightningModule): Autoencoder model class to be trained on each cluster.
-            *base_model_args: Positional arguments for the base model.
+            base_model (IADModel class): Autoencoder model class to be trained on each cluster.
             **base_model_kwargs: Keyword arguments for the base model.
         """
 
@@ -57,14 +55,12 @@ class BAE(IADModel):
             "birch_fit_sample_size": birch_fit_sample_size,
             "birch_fit_quantile": birch_fit_quantile,
             "base_model": base_model,
-            "base_model_args": base_model_args,
             "base_model_kwargs": base_model_kwargs
         }
 
         self.birch = Birch(threshold=birch_threshold, branching_factor=birch_branching_factor, n_clusters=birch_n_clusters)
 
         self.base_model = base_model
-        self.base_model_args = base_model_args
         self.base_model_kwargs = base_model_kwargs
 
         self.birch_fit_sample_size = birch_fit_sample_size
@@ -87,8 +83,8 @@ class BAE(IADModel):
             mlflow_run = mlflow.start_run(run_name=logger_params["run_name"])
             mlflow.log_params(self.hparams | {"base_model" : self.base_model.__name__}, run_id=mlflow_run.info.run_id)
             mlflow.log_params(logger_params["tags"], run_id=mlflow_run.info.run_id)
-            mlflow.log_param("model", self.__class__.__name__, run_id=mlflow_run.info.run_id)
-            mlflow.log_param("max_epochs", max_epochs, run_id=mlflow_run.info.run_id)
+            mlflow.log_params({"model": self.__class__.__name__}, run_id=mlflow_run.info.run_id)
+            mlflow.log_params({"max_epochs": max_epochs}, run_id=mlflow_run.info.run_id)
 
         # select a sample of the data to fit the birch model
         # birch is trained on a sample of the data to speed up the process
@@ -125,7 +121,7 @@ class BAE(IADModel):
         # fit autoencoder model on each cluster
         self.autoencoders = []
         for i, (cluster_train_dataset, cluster_val_dataset) in enumerate(zip(cluster_train_datasets, cluster_val_datasets)):
-            cluster_model = self.base_model(*self.base_model_args, **self.base_model_kwargs)
+            cluster_model = self.base_model(**self.base_model_kwargs)
 
             cluster_model.set_tech_params(**self.tech_params)
 
@@ -152,7 +148,7 @@ class BAE(IADModel):
             mlflow.end_run()
         
 
-    def evaluate(self, dataset):
+    def evaluate(self, dataset, logger_params = {}):
 
         preds = self.predict(dataset)
         anomaly_scores = self.predict_raw(dataset)

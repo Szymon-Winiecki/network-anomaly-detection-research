@@ -7,8 +7,11 @@ import pandas as pd
 
 this_directory = Path(__file__).parent.resolve()
 sys.path.append(str(this_directory / '../datasets'))
+sys.path.append(str(this_directory / '../models'))
 
 from datasets.IDS_Dataset import IDS_Dataset
+
+from models.IADModel import IADModel
 
 class CSVLogger:
     """ Logger class to log experiment records to a CSV file. """
@@ -82,13 +85,13 @@ def load_dataset_folds(dataset_name, dataset_dir, kfolds=3, pipeline=None, rando
     return folds
 
 
-def run_experiment(model, 
-                   dataset,
-                   max_epochs=10,
-                   experiment_name="undefined",
-                   run_name="undefined",
-                   validation_set="val",
-                   save_model=False):
+def run_experiment(model : IADModel, 
+                   dataset : dict,
+                   max_epochs : int = 10,
+                   experiment_name : str = "undefined",
+                   run_name : str = "undefined",
+                   validation_set : str = "val",
+                   save_model : bool = False):
     
     """ Run an experiment with the given model and dataset.
     Args:
@@ -110,6 +113,7 @@ def run_experiment(model,
         persistent_workers=True
     )
 
+    fit_start_time = datetime.now()
     model.fit(dataset['train'], dataset[validation_set], max_epochs=max_epochs, log=True, 
                         logger_params = {
                                 "experiment_name": experiment_name,
@@ -117,6 +121,7 @@ def run_experiment(model,
                                 "log_model": False,
                                 "tags": {"dataset": dataset['train'].name},
                         })
+    fit_end_time = datetime.now()
     
     
     if save_model:
@@ -132,8 +137,12 @@ def run_experiment(model,
     else:
         save_path = ""
 
-    metrics = model.evaluate(dataset[validation_set], logger_params = None)[0]
+    evaluation_start_time = datetime.now()
+    metrics = model.evaluate(dataset[validation_set], logger_params = None)
+    evaluation_end_time = datetime.now()
+
     hparams = {key : model.hparams[key] for key in model.hparams}
+    tech_params = model.tech_params
     experiment_params = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "model": model.__class__.__name__,
@@ -142,17 +151,21 @@ def run_experiment(model,
         "dataset_name": dataset['train'].name,
         "save_path": save_path,
     }
+    experiment_timing = {
+        "fit_duration": (fit_end_time - fit_start_time).total_seconds(),
+        "evaluation_duration": (evaluation_end_time - evaluation_start_time).total_seconds(),
+    }
 
-    experiment_record = experiment_params | hparams | metrics
+    experiment_record = experiment_params | tech_params | experiment_timing | hparams | metrics
 
     return experiment_record
 
-def run_cross_validation(model, 
-                         dataset_folds,
-                         max_epochs=10,
-                         experiment_name="undefined",
-                         run_name="undefined",
-                         save_model=False):
+def run_cross_validation(model : IADModel, 
+                         dataset_folds : list,
+                         max_epochs : int = 10,
+                         experiment_name : str = "undefined",
+                         run_name : str = "undefined",
+                         save_model : bool = False):
     """ Run modified cross-validation with the given model and dataset folds.
     Args:
         model (IADModel): Blueprint of the model to train and evaluate.
@@ -174,7 +187,21 @@ def run_cross_validation(model,
 
     for i, fold in enumerate(dataset_folds):
 
-        new_model = model.__class__(**model.hparams)
+        model_hparams = model.hparams.copy()
+        model_sub_kwargs = {}
+
+        to_delete = []
+        for key, value in model_hparams.items():
+            if 'kwargs' in key:
+                model_sub_kwargs = model_sub_kwargs | value
+                to_delete.append(key)
+
+        for key in to_delete:
+            del model_hparams[key]
+
+        model_params = model_hparams | model_sub_kwargs
+
+        new_model = model.__class__(**model_params)
 
         record = run_experiment(
             new_model, 

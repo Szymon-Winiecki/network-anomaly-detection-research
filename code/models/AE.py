@@ -302,7 +302,7 @@ class AE(L.LightningModule, IADModel):
 
         test_loader = self._get_loader(test_dataset, shuffle=False)
 
-        metrics = trainer.test(self, test_loader)
+        metrics = trainer.test(self, test_loader)[0]
 
         return metrics
 
