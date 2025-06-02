@@ -88,7 +88,7 @@ class AE(AEBase, IADModel):
     def training_step(self, batch, batch_idx):
         x, _, _ = batch
         x_recon = self.forward(x)
-        loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+        loss = self.__calc_loss(x, x_recon)
 
         self.train_step_losses.append(loss.detach().clone())
 
@@ -116,7 +116,7 @@ class AE(AEBase, IADModel):
         x, y, attack_cat = batch
         x_recon = self.forward(x)
 
-        loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+        loss = self.__calc_loss(x, x_recon)
             
         self.validation_step_losses.append(loss)
         self.validation_step_labels.append(y)
@@ -130,6 +130,8 @@ class AE(AEBase, IADModel):
 
         preds = losses > self.threshold
 
+        normal_losses = losses[labels == 0]
+
         accuracy = tmf.accuracy(preds, labels, task="binary")
         precision = tmf.precision(preds, labels, task="binary")
         recall = tmf.recall(preds, labels, task="binary")
@@ -141,6 +143,7 @@ class AE(AEBase, IADModel):
         self.log("val_recall", recall)
         self.log("val_f1", f1)
         self.log("val_auroc", auroc)
+        self.log("val_normal_loss", normal_losses.mean())
 
         self.log("positive_rate", preds.float().mean())
 
@@ -153,7 +156,7 @@ class AE(AEBase, IADModel):
         x, y, attack_cat = batch
         x_recon = self.forward(x)
 
-        loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+        loss = self.__calc_loss(x, x_recon)
 
         self.test_step_losses.append(loss)
         self.test_step_labels.append(y)
@@ -186,7 +189,7 @@ class AE(AEBase, IADModel):
     def predict_step(self, batch, batch_idx):
         x, _, _ = batch
         x_recon = self.forward(x)
-        loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+        loss = self.__calc_loss(x, x_recon)
         pred = loss > self.threshold
         return pred
     
@@ -272,7 +275,7 @@ class AE(AEBase, IADModel):
             for x, _, _ in dataloader:
                 x = x.to(device=self.device)
                 x_recon = self.forward(x)
-                loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+                loss = self.__calc_loss(x, x_recon)
                 pred = loss > self.threshold
 
                 predictions.append(pred)
@@ -298,7 +301,7 @@ class AE(AEBase, IADModel):
             for x, _, _ in dataloader:
                 x = x.to(device=self.device)
                 x_recon = self.forward(x)
-                loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+                loss = self.__calc_loss(x, x_recon)
 
                 scores.append(loss)
 
@@ -336,3 +339,6 @@ class AE(AEBase, IADModel):
 
         return model
 
+    def _calc_loss(self, x, x_recon):
+        """ Calculate the reconstruction loss for each sample in x"""
+        return F.mse_loss(x, x_recon, reduction="none").mean(dim=1)

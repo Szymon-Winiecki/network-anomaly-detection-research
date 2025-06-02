@@ -92,11 +92,13 @@ class CAE(AEBase, IADModel):
         self.validation_step_preds = []
         self.validation_step_labels = []
         self.validation_step_clusters = []
+        self.validation_step_losses = []
 
         self.test_step_socores = []
         self.test_step_preds = []
         self.test_step_labels = []
         self.test_step_clusters = []
+        self.test_step_losses = []
 
     def on_fit_start(self):
 
@@ -127,18 +129,9 @@ class CAE(AEBase, IADModel):
             self.cluster_centers = x_latent[torch.randperm(x_latent.shape[0])[:self.num_clusters]].detach()
             self.choose_centers = False
 
-        distances_to_centers = torch.zeros((x_latent.shape[0], self.num_clusters), device=self.device)
-        for i in range(self.num_clusters):
-            distances_to_centers[:, i] = torch.linalg.vector_norm(x_latent - self.cluster_centers[i], ord=2, dim=1)
+        distances_to_the_closest_center, clusters = self._calc_clusters(x_latent)
 
-        distances_to_the_closest_center = torch.min(distances_to_centers, dim=1).values
-
-        # CAE loss: reconstruction error + clustering loss + centering loss
-        re_loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-        clustering_loss = distances_to_the_closest_center ** 2
-        centering_loss = torch.linalg.vector_norm(self.cluster_centers, ord=2, dim=1) ** 2
-
-        loss = re_loss.mean() + self.clustering_force * clustering_loss.mean() + self.centering_force * centering_loss.mean()
+        loss, re_loss, clustering_loss, centering_loss = self._calc_loss(x, x_recon, distances_to_the_closest_center)
 
         self.train_step_latents.append(x_latent.detach().clone())
         self.train_step_losses.append(loss.detach().clone())
@@ -205,16 +198,10 @@ class CAE(AEBase, IADModel):
 
         x_latent = self.encoder(x)
 
-        distances_to_centers = torch.zeros((x_latent.shape[0], self.num_clusters), device=self.device)
-        for i in range(self.num_clusters):
-            distances_to_centers[:, i] = torch.linalg.vector_norm(x_latent - self.cluster_centers[i], ord=2, dim=1)
-        clusters = torch.argmin(distances_to_centers, dim=1)
-        distances_to_the_closest_center = torch.min(distances_to_centers, dim=1).values
+        distances_to_the_closest_center, clusters = self._calc_clusters(x_latent)
 
         anomaly_scores = distances_to_the_closest_center
-        preds = torch.zeros((x_latent.shape[0]), dtype=bool, device=self.device)
-        for i in range(self.num_clusters):
-            preds[clusters == i] = anomaly_scores[clusters == i] > self.thresholds[i]
+        preds = self._calc_predictions(anomaly_scores, clusters)
 
         self.validation_step_scores.append(anomaly_scores)
         self.validation_step_clusters.append(clusters)
@@ -268,11 +255,7 @@ class CAE(AEBase, IADModel):
 
         x_latent = self.encoder(x)
 
-        distances_to_centers = torch.zeros((x_latent.shape[0], self.num_clusters), device=self.device)
-        for i in range(self.num_clusters):
-            distances_to_centers[:, i] = torch.linalg.vector_norm(x_latent - self.cluster_centers[i], ord=2, dim=1)
-        clusters = torch.argmin(distances_to_centers, dim=1)
-        distances_to_the_closest_center = torch.min(distances_to_centers, dim=1).values
+        distances_to_the_closest_center, clusters = self._calc_clusters(x_latent)
 
         anomaly_scores = distances_to_the_closest_center
         preds = torch.zeros((x_latent.shape[0]), dtype=bool, device=self.device)
@@ -328,16 +311,10 @@ class CAE(AEBase, IADModel):
         x, _, _ = batch
         x_latent = self.encoder(x)
 
-        distances_to_centers = torch.zeros((x_latent.shape[0], self.num_clusters), device=self.device)
-        for i in range(self.num_clusters):
-            distances_to_centers[:, i] = torch.linalg.vector_norm(x_latent - self.cluster_centers[i], ord=2, dim=1)
-        clusters = torch.argmin(distances_to_centers, dim=1)
-        distances_to_the_closest_center = torch.min(distances_to_centers, dim=1).values
+        distances_to_the_closest_center, clusters = self._calc_clusters(x_latent)
 
         anomaly_scores = distances_to_the_closest_center
-        preds = torch.zeros((x_latent.shape[0]), dtype=bool, device=self.device)
-        for i in range(self.num_clusters):
-            preds[clusters == i] = anomaly_scores[clusters == i] > self.thresholds[i]
+        preds = self._calc_predictions(anomaly_scores, clusters)
 
         preds = preds.float().cpu().numpy()
 
@@ -408,7 +385,8 @@ class CAE(AEBase, IADModel):
                 x = x.to(self.device)
                 x_latent = self.encoder(x)
 
-                preds = self._calc_predictions(x_latent)
+                anomaly_scores, clusters = self._calc_clusters(x_latent)
+                preds = self._calc_predictions(anomaly_scores, clusters)
 
                 predictions.append(preds)
 
@@ -433,9 +411,9 @@ class CAE(AEBase, IADModel):
                 x = x.to(self.device)
                 x_latent = self.encoder(x)
 
-                preds = self._calc_anomaly_score(x_latent)
+                anomaly_scores, _ = self._calc_clusters(x_latent)
 
-                predictions.append(preds)
+                predictions.append(anomaly_scores)
 
         predictions = torch.cat(predictions)
 
@@ -449,6 +427,56 @@ class CAE(AEBase, IADModel):
     @staticmethod
     def load(path):
         raise NotImplementedError("Load method not implemented")
+    
+    def _calc_clusters(self, x_latent : torch.Tensor) -> tuple:
+        """ Calculate the clusters for the given latent representation
+        Args:
+            x_latent (torch.Tensor): Latent representation of the input data
+        Returns:
+            tuple: Distances to the closest cluster center (torch.Tensor), clusters (Torch.tensor)
+        """
+        distances_to_centers = torch.zeros((x_latent.shape[0], self.num_clusters), device=self.device)
+        for i in range(self.num_clusters):
+            distances_to_centers[:, i] = torch.linalg.vector_norm(x_latent - self.cluster_centers[i], ord=2, dim=1)
+        clusters = torch.argmin(distances_to_centers, dim=1)
+        distances_to_the_closest_center = torch.min(distances_to_centers, dim=1).values
+
+        return distances_to_the_closest_center, clusters
+    
+    def _calc_loss(self, x : torch.Tensor, x_recon : torch.Tensor, distances_to_the_closest_center : torch.Tensor) -> tuple:
+        """ Calculate the loss for the CAE model
+        Args:
+            x (torch.Tensor): Input tensor
+            x_recon (torch.Tensor | None): Reconstructed input from the latent representation
+            distances_to_the_closest_center (torch.Tensor): Distances to the closest cluster center from each sample in the latent space
+
+        Returns:
+            tuple: Total loss, reconstruction loss, clustering loss, centering loss
+        """
+
+        # CAE loss: reconstruction error + clustering loss + centering loss
+        re_loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+        clustering_loss = distances_to_the_closest_center ** 2
+        centering_loss = torch.linalg.vector_norm(self.cluster_centers, ord=2, dim=1) ** 2
+        
+        loss = re_loss.mean() + self.clustering_force * clustering_loss.mean() + self.centering_force * centering_loss.mean()
+
+        return loss, re_loss, clustering_loss, centering_loss
+    
+    def _calc_predictions(self, anomaly_scores : torch.Tensor, clusters : torch.Tensor) -> torch.Tensor:
+        """ Calculate the predictions based on the anomaly scores and clusters
+        Args:
+            anomaly_scores (torch.Tensor): Anomaly scores for each sample
+            clusters (torch.Tensor): A cluster each sample belongs to
+        Returns:
+            torch.Tensor: Predictions for each sample
+        """
+
+        preds = torch.zeros((anomaly_scores.shape[0]), dtype=bool, device=self.device)
+        for i in range(self.num_clusters):
+            preds[clusters == i] = anomaly_scores[clusters == i] > self.thresholds[i]
+
+        return preds
 
     def plot_latent_space(self, dataset, save_path=None):
         """ Plot the latent space of the model

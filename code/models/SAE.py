@@ -132,10 +132,7 @@ class SAE(AEBase, IADModel):
         x_latent = self.encoder(x)
         x_recon = self.decoder(x_latent)
 
-        # SAE loss: reconstruction loss + l2 regularization (vector norm)
-        re_loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
-        shrink_loss = torch.linalg.vector_norm(x_latent, ord=2, dim=1) ** 2
-        loss = re_loss + self.shrink_weight * shrink_loss
+        loss, re_loss, shrink_loss = self._calc_loss(x, x_recon, x_latent)
 
         self.train_step_latents.append(x_latent.detach().clone())
         self.train_step_losses.append(loss.detach().clone())
@@ -441,6 +438,23 @@ class SAE(AEBase, IADModel):
             plt.savefig(save_path)
         else:
             plt.show()
+
+    def _calc_loss(self, x : torch.Tensor, x_recon : torch.Tensor, x_latent : torch.Tensor):
+        """ Calculate the loss for the SAE model for each sample
+        Args:
+            x (torch.Tensor): Input tensor
+            x_recon (torch.Tensor): Reconstructed tensor
+            x_latent (torch.Tensor): Latent representation of the input tensor
+        Returns:
+            torch.Tensor: Calculated loss
+        """
+
+        # SAE loss: reconstruction loss + l2 regularization (vector norm)
+        re_loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+        shrink_loss = torch.linalg.vector_norm(x_latent, ord=2, dim=1) ** 2
+        loss = re_loss + self.shrink_weight * shrink_loss
+
+        return loss, re_loss, shrink_loss
 
     def _calc_anomaly_score(self, x_latent):
         if self.occ_algorithm == "centroid":
