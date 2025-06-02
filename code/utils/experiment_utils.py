@@ -114,7 +114,7 @@ def run_experiment(model : IADModel,
     )
 
     fit_start_time = datetime.now()
-    model.fit(dataset['train'], dataset[validation_set], max_epochs=max_epochs, log=True, 
+    metrics = model.fit(dataset['train'], dataset[validation_set], max_epochs=max_epochs, log=True, 
                         logger_params = {
                                 "experiment_name": experiment_name,
                                 "run_name": run_name,
@@ -124,6 +124,7 @@ def run_experiment(model : IADModel,
     fit_end_time = datetime.now()
     
     
+    save_start_time = datetime.now()
     if save_model:
         save_dir = Path(f"../saved_models/{experiment_name}/{run_name}")
         file_name = f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{model.__class__.__name__}"
@@ -136,12 +137,16 @@ def run_experiment(model : IADModel,
         save_path = str(save_path)
     else:
         save_path = ""
+    save_end_time = datetime.now()
 
-    evaluation_start_time = datetime.now()
-    metrics = model.evaluate(dataset[validation_set], logger_params = None)
-    evaluation_end_time = datetime.now()
+    hparams = model.hparams.copy()
+    hparams_keys = list(hparams.keys())
+    for key in hparams_keys:
+        if isinstance(hparams[key], dict):
+            for sub_key, sub_value in hparams[key].items():
+                hparams[f"{key}_{sub_key}"] = sub_value
+            del hparams[key]
 
-    hparams = {key : model.hparams[key] for key in model.hparams}
     tech_params = model.tech_params
     experiment_params = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -153,7 +158,7 @@ def run_experiment(model : IADModel,
     }
     experiment_timing = {
         "fit_duration": (fit_end_time - fit_start_time).total_seconds(),
-        "evaluation_duration": (evaluation_end_time - evaluation_start_time).total_seconds(),
+        "save_duration": (save_end_time - save_start_time).total_seconds(),
     }
 
     experiment_record = experiment_params | tech_params | experiment_timing | hparams | metrics
