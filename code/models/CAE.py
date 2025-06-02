@@ -220,26 +220,37 @@ class CAE(AEBase, IADModel):
         accuracy = tmf.accuracy(preds, labels, task="binary")
         precision = tmf.precision(preds, labels, task="binary")
         recall = tmf.recall(preds, labels, task="binary")
+        specificity = tmf.specificity(preds, labels, task="binary")
         f1 = tmf.f1_score(preds, labels, task="binary")
 
         aurocs = torch.zeros((self.num_clusters), device=self.device)
+        average_precisions = torch.zeros((self.num_clusters), device=self.device)
+        cluster_sizes = torch.zeros((self.num_clusters), device=self.device)
         for i in range(self.num_clusters):
             cluster_labels = labels[clusters == i]
             cluster_anomaly_scores = anomaly_scores[clusters == i]
+            cluster_sizes[i] = cluster_labels.shape[0]
             if len(cluster_labels) > 0:
-                aurocs[i] = tmf.auroc(cluster_anomaly_scores, cluster_labels, task="binary")
+                aurocs[i] = tmf.auroc(F.tanh(cluster_anomaly_scores), cluster_labels, task="binary")
+                average_precisions[i] = tmf.average_precision(F.tanh(cluster_anomaly_scores), cluster_labels, task="binary")
             else:
                 aurocs[i] = torch.tensor(0.0, device=self.device)
-        auroc = aurocs.mean()
+                average_precisions[i] = torch.tensor(0.0, device=self.device)
+        auroc = (aurocs * cluster_sizes / cluster_sizes.sum()).mean()
+        average_precision = (average_precisions * cluster_sizes / cluster_sizes.sum()).mean()
 
         self.log("val_accuracy", accuracy)
         self.log("val_precision", precision)
         self.log("val_recall", recall)
+        self.log("val_specificity", specificity)
         self.log("val_f1", f1)
         self.log("val_auroc", auroc)
+        self.log("val_average_precision", average_precision)
 
         for i in range(self.num_clusters):
             self.log(f"val_auroc_cluster_{i}", aurocs[i])
+            self.log(f"val_average_precision_cluster_{i}", average_precisions[i])
+            self.log(f"val_cluster_size_{i}", cluster_sizes[i])
 
         self.log("positive_rate", preds.float().mean())
 
@@ -279,27 +290,37 @@ class CAE(AEBase, IADModel):
         accuracy = tmf.accuracy(preds, labels, task="binary")
         precision = tmf.precision(preds, labels, task="binary")
         recall = tmf.recall(preds, labels, task="binary")
+        specificity = tmf.specificity(preds, labels, task="binary")
         f1 = tmf.f1_score(preds, labels, task="binary")
 
         aurocs = torch.zeros((self.num_clusters), device=self.device)
+        average_precisions = torch.zeros((self.num_clusters), device=self.device)
+        cluster_sizes = torch.zeros((self.num_clusters), device=self.device)
         for i in range(self.num_clusters):
             cluster_labels = labels[clusters == i]
             cluster_anomaly_scores = anomaly_scores[clusters == i]
+            cluster_sizes[i] = cluster_labels.shape[0]
             if len(cluster_labels) > 0:
-                aurocs[i] = tmf.auroc(cluster_anomaly_scores, cluster_labels, task="binary")
+                aurocs[i] = tmf.auroc(F.tanh(cluster_anomaly_scores), cluster_labels, task="binary")
+                average_precisions[i] = tmf.average_precision(F.tanh(cluster_anomaly_scores), cluster_labels, task="binary")
             else:
                 aurocs[i] = torch.tensor(0.0, device=self.device)
-
-        auroc = aurocs.mean()
+                average_precisions[i] = torch.tensor(0.0, device=self.device)
+        auroc = (aurocs * cluster_sizes / cluster_sizes.sum()).mean()
+        average_precision = (average_precisions * cluster_sizes / cluster_sizes.sum()).mean()
 
         self.log("test_accuracy", accuracy)
         self.log("test_precision", precision)
         self.log("test_recall", recall)
+        self.log("test_specificity", specificity)
         self.log("test_f1", f1)
         self.log("test_auroc", auroc)
+        self.log("test_average_precision", average_precision)
 
         for i in range(self.num_clusters):
             self.log(f"test_auroc_cluster_{i}", aurocs[i])
+            self.log(f"test_average_precision_cluster_{i}", average_precisions[i])
+            self.log(f"test_cluster_size_{i}", cluster_sizes[i])
 
         # Reset the losses and labels for the next epoch
         self.test_step_socores.clear()

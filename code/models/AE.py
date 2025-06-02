@@ -134,14 +134,19 @@ class AE(AEBase, IADModel):
         accuracy = tmf.accuracy(preds, labels, task="binary")
         precision = tmf.precision(preds, labels, task="binary")
         recall = tmf.recall(preds, labels, task="binary")
+        specificity = tmf.specificity(preds, labels, task="binary")
         f1 = tmf.f1_score(preds, labels, task="binary")
         auroc = tmf.auroc(F.tanh(losses), labels, task="binary") # tanh to transform losses form (0, inf) to (0,1) range (for AUROC metric)
+        average_precision = tmf.average_precision(F.tanh(losses), labels, task="binary")
 
         self.log("val_accuracy", accuracy)
         self.log("val_precision", precision)
         self.log("val_recall", recall)
+        self.log("val_specificity", specificity)
         self.log("val_f1", f1)
         self.log("val_auroc", auroc)
+        self.log("val_average_precision", average_precision)
+
         self.log("val_normal_loss", normal_losses.mean())
 
         self.log("positive_rate", preds.float().mean())
@@ -172,14 +177,18 @@ class AE(AEBase, IADModel):
         accuracy = tmf.accuracy(preds, labels, task="binary")
         precision = tmf.precision(preds, labels, task="binary")
         recall = tmf.recall(preds, labels, task="binary")
+        specificity = tmf.specificity(preds, labels, task="binary")
         f1 = tmf.f1_score(preds, labels, task="binary")
         auroc = tmf.auroc(F.tanh(losses), labels, task="binary")
+        average_precision = tmf.average_precision(F.tanh(losses), labels, task="binary")
 
         self.log("test_accuracy", accuracy)
         self.log("test_precision", precision)
         self.log("test_recall", recall)
+        self.log("test_specificity", specificity)
         self.log("test_f1", f1)
         self.log("test_auroc", auroc)
+        self.log("test_average_precision", average_precision)
 
         # Reset the losses and labels for the next epoch
         self.test_step_losses.clear()

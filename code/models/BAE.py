@@ -5,7 +5,7 @@ from sklearn.cluster import Birch
 from torch.utils.data import TensorDataset
 import torch
 
-import torcheval.metrics.functional as tmf
+import torchmetrics.functional as tmf
 
 import mlflow
 
@@ -156,20 +156,45 @@ class BAE(IADModel):
         anomaly_scores = self.predict_raw(dataset)
         labels = dataset.y.clone().detach()
 
-        accuracy = tmf.binary_accuracy(preds, labels)
-        precision = tmf.binary_precision(preds, labels)
-        recall = tmf.binary_recall(preds, labels)
-        f1 = tmf.binary_f1_score(preds, labels)
-        auroc = tmf.binary_auroc(anomaly_scores, labels)
+        accuracy = tmf.accuracy(preds, labels, task="binary")
+        precision = tmf.precision(preds, labels, task="binary")
+        recall = tmf.recall(preds, labels, task="binary")
+        specificity = tmf.specificity(preds, labels, task="binary")
+        f1 = tmf.f1_score(preds, labels, task="binary")
+        
+        clusters = self.birch.predict(dataset.x.cpu().numpy())
+
+        aurocs = torch.zeros((self.birch.n_clusters), device=anomaly_scores.device)
+        average_precisions = torch.zeros((self.birch.n_clusters), device=anomaly_scores.device)
+        cluster_sizes = torch.zeros((self.birch.n_clusters), device=anomaly_scores.device)
+        for i in range(self.birch.n_clusters):
+            cluster_labels = labels[clusters == i]
+            cluster_anomaly_scores = anomaly_scores[clusters == i]
+            cluster_sizes[i] = cluster_labels.shape[0]
+            if len(cluster_labels) > 0:
+                aurocs[i] = tmf.auroc(cluster_anomaly_scores, cluster_labels, task="binary")
+                average_precisions[i] = tmf.average_precision(cluster_anomaly_scores, cluster_labels, task="binary")
+            else:
+                aurocs[i] = torch.tensor(0.0, device=anomaly_scores.device)
+                average_precisions[i] = torch.tensor(0.0, anomaly_scores=self.device)
+        auroc = (aurocs * cluster_sizes / cluster_sizes.sum()).mean()
+        average_precision = (average_precisions * cluster_sizes / cluster_sizes.sum()).mean()
 
 
         metrics = {
             "test_accuracy": accuracy,
             "test_precision": precision,
             "test_recall": recall,
+            "test_specificity": specificity,
             "test_f1": f1,
-            "test_auroc": auroc
+            "test_auroc": auroc,
+            "test_average_precision": average_precision,
         }
+
+        for i in range(self.birch.n_clusters):
+            metrics[f"test_auroc_cluster_{i}"] = aurocs[i]
+            metrics[f"test_average_precision_cluster_{i}"] = average_precisions[i]
+            metrics[f"test_cluster_size_{i}"] = cluster_sizes[i]
 
         return metrics
 

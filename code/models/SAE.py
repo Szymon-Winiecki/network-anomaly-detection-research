@@ -216,18 +216,23 @@ class SAE(AEBase, IADModel):
             accuracy = tmf.accuracy(preds, labels, task="binary")
             precision = tmf.precision(preds, labels, task="binary")
             recall = tmf.recall(preds, labels, task="binary")
+            specificity = tmf.specificity(preds, labels, task="binary")
             f1 = tmf.f1_score(preds, labels, task="binary")
 
             if self.occ_algorithm == "re":
                 auroc = tmf.auroc(F.tanh(anomaly_scores), labels, task="binary")
+                average_precision = tmf.average_precision(F.tanh(anomaly_scores), labels, task="binary")
             else:
                 auroc = tmf.auroc(anomaly_scores, labels, task="binary")
+                average_precision = tmf.average_precision(anomaly_scores, labels, task="binary")
 
             self.log("val_accuracy", accuracy)
             self.log("val_precision", precision)
             self.log("val_recall", recall)
+            self.log("val_specificity", specificity)
             self.log("val_f1", f1)
             self.log("val_auroc", auroc)
+            self.log("val_average_precision", average_precision)
 
             self.log("positive_rate", preds.float().mean())
 
@@ -268,14 +273,23 @@ class SAE(AEBase, IADModel):
         accuracy = tmf.accuracy(preds, labels, task="binary")
         precision = tmf.precision(preds, labels, task="binary")
         recall = tmf.recall(preds, labels, task="binary")
+        specificity = tmf.specificity(preds, labels, task="binary")
         f1 = tmf.f1_score(preds, labels, task="binary")
-        auroc = tmf.auroc(anomaly_scores, labels, task="binary")
+        
+        if self.occ_algorithm == "re":
+            auroc = tmf.auroc(F.tanh(anomaly_scores), labels, task="binary")
+            average_precision = tmf.average_precision(F.tanh(anomaly_scores), labels, task="binary")
+        else:
+            auroc = tmf.auroc(anomaly_scores, labels, task="binary")
+            average_precision = tmf.average_precision(anomaly_scores, labels, task="binary")
 
         self.log("test_accuracy", accuracy)
         self.log("test_precision", precision)
         self.log("test_recall", recall)
+        self.log("test_specificity", specificity)
         self.log("test_f1", f1)
         self.log("test_auroc", auroc)
+        self.log("test_average_precision", average_precision)
 
         # Reset the losses and labels for the next epoch
         self.test_step_socores.clear()
@@ -353,9 +367,14 @@ class SAE(AEBase, IADModel):
             for batch in dataloader:
                 x, _, _ = batch
                 x = x.to(self.device)
-                x_latent = self.encoder(x)
 
-                preds = self._calc_predictions(x_latent)
+                if self.occ_algorithm == "re":
+                    x_recon = self.forward(x)
+                    anomaly_score = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+                    preds = anomaly_score > self.threshold
+                else:
+                    x_latent = self.encoder(x)
+                    preds = self._calc_predictions(x_latent)
 
                 predictions.append(preds)
 
@@ -378,9 +397,14 @@ class SAE(AEBase, IADModel):
             for batch in dataloader:
                 x, _, _ = batch
                 x = x.to(self.device)
-                x_latent = self.encoder(x)
-
-                preds = self._calc_anomaly_score(x_latent)
+                
+                if self.occ_algorithm == "re":
+                    x_recon = self.forward(x)
+                    preds = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+                    preds = F.tanh(preds)
+                else:
+                    x_latent = self.encoder(x)
+                    preds = self._calc_anomaly_score(x_latent)
 
                 predictions.append(preds)
 
