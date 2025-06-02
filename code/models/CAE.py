@@ -368,9 +368,9 @@ class CAE(AEBase, IADModel):
         return metrics
 
     def predict(self, dataset):
-        
-        if self.occ_algorithm == "centroid":
-            self.cen_dst_threshold = self.cen_dst_threshold.to(self.device)
+
+        self.cluster_centers = self.cluster_centers.to(self.device)
+        self.thresholds = self.thresholds.to(self.device)
         
         model_mode = self.training
         self.eval()
@@ -398,6 +398,9 @@ class CAE(AEBase, IADModel):
 
     def predict_raw(self, dataset):
 
+        self.cluster_centers = self.cluster_centers.to(self.device)
+        self.thresholds = self.thresholds.to(self.device)
+
         model_mode = self.training
         self.eval()
 
@@ -412,6 +415,7 @@ class CAE(AEBase, IADModel):
                 x_latent = self.encoder(x)
 
                 anomaly_scores, _ = self._calc_clusters(x_latent)
+                anomaly_scores = F.tanh(anomaly_scores)
 
                 predictions.append(anomaly_scores)
 

@@ -6,7 +6,6 @@ from lightning.pytorch.loggers import MLFlowLogger
 import torch.nn.functional as F
 import torch
 
-# import torcheval.metrics.functional as tmf
 import torchmetrics.functional as tmf
 
 from IADModel import IADModel
@@ -88,7 +87,7 @@ class AE(AEBase, IADModel):
     def training_step(self, batch, batch_idx):
         x, _, _ = batch
         x_recon = self.forward(x)
-        loss = self.__calc_loss(x, x_recon)
+        loss = self._calc_loss(x, x_recon)
 
         self.train_step_losses.append(loss.detach().clone())
 
@@ -116,7 +115,7 @@ class AE(AEBase, IADModel):
         x, y, attack_cat = batch
         x_recon = self.forward(x)
 
-        loss = self.__calc_loss(x, x_recon)
+        loss = self._calc_loss(x, x_recon)
             
         self.validation_step_losses.append(loss)
         self.validation_step_labels.append(y)
@@ -156,7 +155,7 @@ class AE(AEBase, IADModel):
         x, y, attack_cat = batch
         x_recon = self.forward(x)
 
-        loss = self.__calc_loss(x, x_recon)
+        loss = self._calc_loss(x, x_recon)
 
         self.test_step_losses.append(loss)
         self.test_step_labels.append(y)
@@ -189,7 +188,7 @@ class AE(AEBase, IADModel):
     def predict_step(self, batch, batch_idx):
         x, _, _ = batch
         x_recon = self.forward(x)
-        loss = self.__calc_loss(x, x_recon)
+        loss = self._calc_loss(x, x_recon)
         pred = loss > self.threshold
         return pred
     
@@ -275,7 +274,7 @@ class AE(AEBase, IADModel):
             for x, _, _ in dataloader:
                 x = x.to(device=self.device)
                 x_recon = self.forward(x)
-                loss = self.__calc_loss(x, x_recon)
+                loss = self._calc_loss(x, x_recon)
                 pred = loss > self.threshold
 
                 predictions.append(pred)
@@ -301,7 +300,8 @@ class AE(AEBase, IADModel):
             for x, _, _ in dataloader:
                 x = x.to(device=self.device)
                 x_recon = self.forward(x)
-                loss = self.__calc_loss(x, x_recon)
+                loss = self._calc_loss(x, x_recon)
+                loss = F.tanh(loss)
 
                 scores.append(loss)
 

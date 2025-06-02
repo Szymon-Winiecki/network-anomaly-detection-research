@@ -140,12 +140,14 @@ class BAE(IADModel):
 
             self.autoencoders.append(cluster_model)
         
+        metrics = self.evaluate(val_dataset)
 
         if log:
-            metrics = self.evaluate(val_dataset)
 
             mlflow.log_metrics(metrics, run_id=mlflow_run.info.run_id)
             mlflow.end_run()
+
+        return metrics
         
 
     def evaluate(self, dataset, logger_params = {}):
