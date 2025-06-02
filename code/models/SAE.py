@@ -3,10 +3,8 @@ from pathlib import Path
 import lightning as L
 from lightning.pytorch.loggers import MLFlowLogger
 
-from torch import nn, optim
 import torch.nn.functional as F
 import torch
-from torch.optim.lr_scheduler import LinearLR
 
 # import torcheval.metrics.functional as tmf
 import torchmetrics.functional as tmf
@@ -20,9 +18,10 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
-from IADModel import IADModel, _init_weights_xavier_uniform
+from IADModel import IADModel
+from AEBase import AEBase
 
-class SAE(L.LightningModule, IADModel):
+class SAE(AEBase, IADModel):
     """ Shrink Autoencoder model 
 
     Implementation of model proposed in a paper:
@@ -36,11 +35,13 @@ class SAE(L.LightningModule, IADModel):
                  hidden_sizes : list[int], 
                  dropout : bool | float = False, 
                  batch_norm : bool = False, 
-                 lmb : float = 0.1,
                  initial_lr : float = 1e-3, 
                  linear_lr_start_factor : float = 1.0, 
                  linear_lr_end_factor : float = 0.1, 
                  linear_lr_total_iters : int = 100,
+                 optimizer : str = "Adam",
+                 optimizer_params : dict = None,
+                 lmb : float = 0.1,
                  fit_occ_once : bool = False,
                  occ_algorithm : str = "centroid",
                  threshold_quantile : float = 0.9,
@@ -53,11 +54,13 @@ class SAE(L.LightningModule, IADModel):
             hidden_sizes (list): List of sizes of the hidden layers of encoder, last element is the size of the bottleneck layer. Decoder will have the same hidden sizes in reverse order. 
             dropout (False | float, optional): If float, it will be used as the dropout rate. If False no dropout layers are used. Defaults to False. Float 0.0 is treated as False.
             batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
-            lmb (float, optional): Balance parameter for the SAE loss (relative importance of shrinking part). Defaults to 0.1.
             initial_lr (float, optional): Initial learning rate. Defaults to 1e-3.
             linear_lr_start_factor (float, optional): Start factor for the linear learning rate scheduler. Defaults to 1.
             linear_lr_end_factor (float, optional): End factor for the linear learning rate scheduler. Defaults to 0.1.
             linear_lr_total_iters (int, optional): Total iterations (num epochs) for the linear learning rate scheduler. Defaults to 100.
+            optimizer (str, optional): Optimizer to use. Supported optimizers are: Adam, SGD, Adadelta, Adagrad, AdamW. Defaults to "Adam".
+            optimizer_params (dict, optional): Additional parameters for the optimizer. Defaults to None.
+            lmb (float, optional): Balance parameter for the SAE loss. Defaults to 0.1.
             fit_occ_once (bool, optional): if False, the model will fit the OCC algorithm every epoch. If True, the model will fit the OCC algorithm only once, at the end of the training, it also results in no validation metrics from non-last epochs. Defaults to False.
             occ_algorithm (str, optional): OCC algorithm to use. Supported algorithms are: centroid, lof, svm, re. Defaults to "centroid".
                 re (reconstruction error) is a special case, where the model uses the reconstruction error as the anomaly score and the threshold is calculated based on the training set (not an occ).
@@ -66,33 +69,32 @@ class SAE(L.LightningModule, IADModel):
             *occ_args: Additional arguments for the OCC algorithm.
             **occ_kwargs: Additional keyword arguments for the OCC algorithm.
         """
-        super().__init__()
-        IADModel.__init__(self)
+        super().__init__(
+            input_size=input_size,
+            hidden_sizes=hidden_sizes,
+            dropout=dropout,
+            batch_norm=batch_norm,
+            initial_lr=initial_lr,
+            linear_lr_start_factor=linear_lr_start_factor,
+            linear_lr_end_factor=linear_lr_end_factor,
+            linear_lr_total_iters=linear_lr_total_iters,
+            optimizer=optimizer,
+            optimizer_params=optimizer_params,
+            lmb=lmb,
+            fit_occ_once=fit_occ_once,
+            occ_algorithm=occ_algorithm,
+            threshold_quantile=threshold_quantile,
+            occ_fit_sample_size=occ_fit_sample_size,
+            **occ_kwargs
+        )
 
-        self.save_hyperparameters()
-
-        self.input_size = input_size
-        self.hidden_sizes = hidden_sizes
-        self.dropout = dropout
-        self.batch_norm = batch_norm
-
-        self.shrink_weight = lmb / (1 + lmb) # shrink weight for the SAE loss
-        self.re_weight = 1 - self.shrink_weight # reconstruction error weight for the SAE loss
-        
-        self.initial_lr = initial_lr
-        self.linear_lr_start_factor = linear_lr_start_factor
-        self.linear_lr_end_factor = linear_lr_end_factor
-        self.linear_lr_total_iters = linear_lr_total_iters
+        self.shrink_weight = lmb
 
         self.threshold_quantile = threshold_quantile
         self.fit_occ_once = fit_occ_once
         self.occ_fit_sample_size = occ_fit_sample_size
 
-        self.encoder = self._build_encoder()
-
-        self.decoder = self._build_decoder()
-
-        self._prepare_occ(occ_algorithm, *occ_args, **occ_kwargs)
+        self._prepare_occ(occ_algorithm, **occ_kwargs)
 
         # store the latents of each sample to train the classifier
         self.train_step_latents = []
@@ -111,44 +113,6 @@ class SAE(L.LightningModule, IADModel):
         self.test_step_socores = []
         self.test_step_preds = []
         self.test_step_labels = []
-
-
-    def _build_encoder(self):
-        """ Create the encoder NN here """
-        encoder = nn.Sequential()
-        input_size = self.input_size
-        for hidden_size in self.hidden_sizes[:-1]:
-            encoder.append(nn.Linear(input_size, hidden_size))
-            if self.batch_norm:
-                encoder.append(nn.BatchNorm1d(hidden_size))
-            encoder.append(nn.Tanh())
-            if self.dropout:
-                encoder.append(nn.Dropout(self.dropout))
-            input_size = hidden_size
-        
-        encoder.append(nn.Linear(input_size, self.hidden_sizes[-1]))
-
-        encoder.apply(_init_weights_xavier_uniform)
-
-        return encoder
-    
-    def _build_decoder(self):
-        decoder = nn.Sequential()
-        input_size = self.hidden_sizes[-1]
-        for hidden_size in reversed(self.hidden_sizes[:-1]):
-            decoder.append(nn.Linear(input_size, hidden_size))
-            if self.batch_norm:
-                decoder.append(nn.BatchNorm1d(hidden_size))
-            decoder.append(nn.Tanh())
-            if self.dropout:
-                decoder.append(nn.Dropout(self.dropout))
-            input_size = hidden_size
-
-        decoder.append(nn.Linear(input_size, self.input_size))
-
-        decoder.apply(_init_weights_xavier_uniform)
-
-        return decoder
 
     def on_fit_start(self):
         self.logger.log_hyperparams({
@@ -171,7 +135,7 @@ class SAE(L.LightningModule, IADModel):
         # SAE loss: reconstruction loss + l2 regularization (vector norm)
         re_loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
         shrink_loss = torch.linalg.vector_norm(x_latent, ord=2, dim=1) ** 2
-        loss = self.re_weight * re_loss + self.shrink_weight * shrink_loss
+        loss = re_loss + self.shrink_weight * shrink_loss
 
         self.train_step_latents.append(x_latent.detach().clone())
         self.train_step_losses.append(loss.detach().clone())
@@ -329,19 +293,6 @@ class SAE(L.LightningModule, IADModel):
 
         return preds
 
-    def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=self.initial_lr)
-        scheduler = LinearLR(optimizer, start_factor=self.linear_lr_start_factor, end_factor=self.linear_lr_end_factor, total_iters=self.linear_lr_total_iters)
-
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "epoch",
-                "frequency": 1,
-            },
-        }
-
     def fit(self, 
             train_dataset, 
             val_dataset = None, 
@@ -368,6 +319,10 @@ class SAE(L.LightningModule, IADModel):
         val_loader = self._get_loader(val_dataset, shuffle=False) if val_dataset else None
 
         trainer.fit(self, train_loader, val_loader)
+
+        metrics = {metric : value.item() for metric, value in trainer.logged_metrics.items()}
+
+        return metrics
 
     def evaluate(self, test_dataset, logger_params = {}):
         
@@ -539,16 +494,16 @@ class SAE(L.LightningModule, IADModel):
         
         return False
     
-    def _prepare_occ(self, occ_algorithm, *occ_args, **occ_kwargs):
+    def _prepare_occ(self, occ_algorithm, **occ_kwargs):
         self.occ_algorithm = occ_algorithm
 
         if occ_algorithm == "centroid":
-            self.classifier = GaussianMixture(n_components = 1, *occ_args, **occ_kwargs)
+            self.classifier = GaussianMixture(n_components = 1, **occ_kwargs)
             self.cen_dst_threshold = 0
         elif occ_algorithm == "lof":
-            self.classifier = LocalOutlierFactor(novelty=True, *occ_args, **occ_kwargs)
+            self.classifier = LocalOutlierFactor(novelty=True, **occ_kwargs)
         elif occ_algorithm == "svm":
-            self.classifier = OneClassSVM(*occ_args, **occ_kwargs)
+            self.classifier = OneClassSVM(**occ_kwargs)
         elif occ_algorithm == "re":
             self.threshold = 0
         else:

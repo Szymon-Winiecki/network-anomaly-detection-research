@@ -3,17 +3,16 @@ from pathlib import Path
 import lightning as L
 from lightning.pytorch.loggers import MLFlowLogger
 
-from torch import nn, optim
 import torch.nn.functional as F
 import torch
-from torch.optim.lr_scheduler import LinearLR
 
 # import torcheval.metrics.functional as tmf
 import torchmetrics.functional as tmf
 
-from IADModel import IADModel, _init_weights_xavier_uniform
+from IADModel import IADModel
+from AEBase import AEBase
 
-class AE(L.LightningModule, IADModel):
+class AE(AEBase, IADModel):
     """ Standard autoencoder model to make predicions based on reconstruction error """
 
     def __init__(self, 
@@ -25,7 +24,9 @@ class AE(L.LightningModule, IADModel):
                  linear_lr_start_factor : float = 1.0, 
                  linear_lr_end_factor : float = 0.1, 
                  linear_lr_total_iters : int = 100,
-                 threshold_quantile : float = 0.9):
+                 optimizer : str = "Adam",
+                 optimizer_params : dict = None,
+                 threshold_quantile : float = 0.9,):
         """ Standard autoencoder model to make predicions based on reconstruction error
 
         Args:
@@ -37,29 +38,26 @@ class AE(L.LightningModule, IADModel):
             linear_lr_start_factor (float, optional): Start factor for the linear learning rate scheduler. Defaults to 1.
             linear_lr_end_factor (float, optional): End factor for the linear learning rate scheduler. Defaults to 0.1.
             linear_lr_total_iters (int, optional): Total iterations (num epochs) for the linear learning rate scheduler. Defaults to 100.
+            optimizer (str, optional): Optimizer to use. Supported optimizers are: Adam, SGD, Adadelta, Adagrad, AdamW. Defaults to "Adam".
+            optimizer_params (dict, optional): Additional parameters for the optimizer. Defaults to None.
             threshold_quantile (float, optional): Detection threshold is set to the quantile of the training losses. Defaults to 0.9.
         """
 
-        super().__init__()
-        IADModel.__init__(self)
-
-        self.save_hyperparameters()
-
-        self.input_size = input_size
-        self.hidden_sizes = hidden_sizes
-        self.dropout = dropout
-        self.batch_norm = batch_norm
-
-        self.initial_lr = initial_lr
-        self.linear_lr_start_factor = linear_lr_start_factor
-        self.linear_lr_end_factor = linear_lr_end_factor
-        self.linear_lr_total_iters = linear_lr_total_iters
+        super().__init__(
+            input_size=input_size, 
+            hidden_sizes=hidden_sizes, 
+            dropout=dropout, 
+            batch_norm=batch_norm, 
+            initial_lr=initial_lr, 
+            linear_lr_start_factor=linear_lr_start_factor, 
+            linear_lr_end_factor=linear_lr_end_factor, 
+            linear_lr_total_iters=linear_lr_total_iters,
+            optimizer=optimizer,
+            optimizer_params=optimizer_params,
+            threshold_quantile=threshold_quantile,
+        )
 
         self.threshold_quantile = threshold_quantile
-
-        self.encoder = self._build_encoder()
-
-        self.decoder = self._build_decoder()
 
         self.threshold = 0
 
@@ -73,43 +71,6 @@ class AE(L.LightningModule, IADModel):
 
         self.test_step_losses = []
         self.test_step_labels = []
-
-
-    def _build_encoder(self):
-        encoder = nn.Sequential()
-        input_size = self.input_size
-        for hidden_size in self.hidden_sizes[:-1]:
-            encoder.append(nn.Linear(input_size, hidden_size))
-            if self.batch_norm:
-                encoder.append(nn.BatchNorm1d(hidden_size))
-            encoder.append(nn.Tanh())
-            if self.dropout:
-                encoder.append(nn.Dropout(self.dropout))
-            input_size = hidden_size
-
-        encoder.append(nn.Linear(input_size, self.hidden_sizes[-1]))
-
-        encoder.apply(_init_weights_xavier_uniform)
-
-        return encoder
-    
-    def _build_decoder(self):
-        decoder = nn.Sequential()
-        input_size = self.hidden_sizes[-1]
-        for hidden_size in reversed(self.hidden_sizes[:-1]):
-            decoder.append(nn.Linear(input_size, hidden_size))
-            if self.batch_norm:
-                decoder.append(nn.BatchNorm1d(hidden_size))
-            decoder.append(nn.Tanh())
-            if self.dropout:
-                decoder.append(nn.Dropout(self.dropout))
-            input_size = hidden_size
-
-        decoder.append(nn.Linear(input_size, self.input_size))
-        
-        decoder.apply(_init_weights_xavier_uniform)
-
-        return decoder
 
     def on_fit_start(self):
         self.logger.log_hyperparams({
@@ -228,19 +189,6 @@ class AE(L.LightningModule, IADModel):
         loss = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
         pred = loss > self.threshold
         return pred
-
-    def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=self.initial_lr)
-        scheduler = LinearLR(optimizer, start_factor=self.linear_lr_start_factor, end_factor=self.linear_lr_end_factor, total_iters=self.linear_lr_total_iters)
-
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "epoch",
-                "frequency": 1,
-            },
-        }
     
     def adjust_threshold(self, score, y):
         """
@@ -290,6 +238,10 @@ class AE(L.LightningModule, IADModel):
 
         trainer.fit(self, train_loader, val_loader)
 
+        metrics = {metric : value.item() for metric, value in trainer.logged_metrics.items()}
+
+        return metrics
+        
     def evaluate(self, test_dataset, logger_params = {}):
         
         if logger_params:
