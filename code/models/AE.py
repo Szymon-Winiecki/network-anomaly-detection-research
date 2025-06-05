@@ -20,11 +20,10 @@ class AE(AEBase, IADModel):
                  dropout : bool | float = False, 
                  batch_norm : bool = False, 
                  initial_lr : float = 1e-3, 
-                 linear_lr_start_factor : float = 1.0, 
-                 linear_lr_end_factor : float = 0.1, 
-                 linear_lr_total_iters : int = 100,
                  optimizer : str = "Adam",
                  optimizer_params : dict = None,
+                 scheduler : str | None = None,
+                 scheduler_params : dict = None,
                  threshold_quantile : float = 0.9,):
         """ Standard autoencoder model to make predicions based on reconstruction error
 
@@ -34,11 +33,10 @@ class AE(AEBase, IADModel):
             dropout (False | float, optional): If float, it will be used as the dropout rate. If False no dropout layers are used. Defaults to False. Float 0.0 is treated as False.
             batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
             initial_lr (float, optional): Initial learning rate. Defaults to 1e-3.
-            linear_lr_start_factor (float, optional): Start factor for the linear learning rate scheduler. Defaults to 1.
-            linear_lr_end_factor (float, optional): End factor for the linear learning rate scheduler. Defaults to 0.1.
-            linear_lr_total_iters (int, optional): Total iterations (num epochs) for the linear learning rate scheduler. Defaults to 100.
             optimizer (str, optional): Optimizer to use. Supported optimizers are: Adam, SGD, Adadelta, Adagrad, AdamW. Defaults to "Adam".
             optimizer_params (dict, optional): Additional parameters for the optimizer. Defaults to None.
+            scheduler (str, optional): Learning rate scheduler to use. Supported schedulers are: LinearLR, ExponentialLR, CosineAnnealingLR, StepLR. Defaults to "LinearLR".
+            scheduler_params (dict, optional): Additional parameters for the scheduler. Defaults to None.
             threshold_quantile (float, optional): Detection threshold is set to the quantile of the training losses. Defaults to 0.9.
         """
 
@@ -48,11 +46,10 @@ class AE(AEBase, IADModel):
             dropout=dropout, 
             batch_norm=batch_norm, 
             initial_lr=initial_lr, 
-            linear_lr_start_factor=linear_lr_start_factor, 
-            linear_lr_end_factor=linear_lr_end_factor, 
-            linear_lr_total_iters=linear_lr_total_iters,
             optimizer=optimizer,
             optimizer_params=optimizer_params,
+            scheduler=scheduler,
+            scheduler_params=scheduler_params,
             threshold_quantile=threshold_quantile,
         )
 

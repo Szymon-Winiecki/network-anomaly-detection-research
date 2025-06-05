@@ -10,11 +10,10 @@ class AEBase(L.LightningModule):
                  dropout : bool | float = False, 
                  batch_norm : bool = False, 
                  initial_lr : float = 1e-3, 
-                 linear_lr_start_factor : float = 1.0, 
-                 linear_lr_end_factor : float = 0.1, 
-                 linear_lr_total_iters : int = 100,
                  optimizer : str = "Adam",
                  optimizer_params : dict = None,
+                 scheduler : str | None = None,
+                 scheduler_params : dict = None,
                  **kwargs):
         
         super().__init__()
@@ -27,12 +26,12 @@ class AEBase(L.LightningModule):
         self.batch_norm = batch_norm
 
         self.initial_lr = initial_lr
-        self.linear_lr_start_factor = linear_lr_start_factor
-        self.linear_lr_end_factor = linear_lr_end_factor
-        self.linear_lr_total_iters = linear_lr_total_iters
 
         self.optimizer = optimizer
         self.optimizer_params = optimizer_params if optimizer_params else {}
+
+        self.scheduler = scheduler
+        self.scheduler_params = scheduler_params if scheduler_params else {}
 
         self.encoder = self._build_encoder()
 
@@ -89,8 +88,27 @@ class AEBase(L.LightningModule):
                 optimizer = optim.AdamW(self.parameters(), lr=self.initial_lr, **self.optimizer_params)
             case _:
                 raise ValueError(f"Unknown optimizer: {self.optimizer}. Supported optimizers are: Adam, SGD, Adadelta, Adagrad, AdamW.")
-            
-        scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=self.linear_lr_start_factor, end_factor=self.linear_lr_end_factor, total_iters=self.linear_lr_total_iters)
+        
+        if not self.scheduler:
+            return optimizer
+        
+        match self.scheduler:
+            case "LinearLR":
+                scheduler = optim.lr_scheduler.LinearLR(optimizer, **self.scheduler_params)
+            case "StepLR":
+                scheduler = optim.lr_scheduler.StepLR(optimizer, **self.scheduler_params)
+            case "MultiStepLR":
+                scheduler = optim.lr_scheduler.MultiStepLR(optimizer, **self.scheduler_params)
+            case "ExponentialLR":
+                scheduler = optim.lr_scheduler.ExponentialLR(optimizer, **self.scheduler_params)
+            case "CosineAnnealingLR":
+                scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, **self.scheduler_params)
+            case "CosineAnnealingWarmRestarts":
+                scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, **self.scheduler_params)
+            case "CyclicLR":
+                scheduler = optim.lr_scheduler.CyclicLR(optimizer, **self.scheduler_params)
+            case _: 
+                raise ValueError(f"Unknown scheduler: {self.scheduler}. Supported schedulers are: LinearLR, StepLR, ExponentialLR, CosineAnnealingLR.")
 
         return {
             "optimizer": optimizer,
