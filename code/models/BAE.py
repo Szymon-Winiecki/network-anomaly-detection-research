@@ -177,8 +177,8 @@ class BAE(IADModel):
             else:
                 aurocs[i] = torch.tensor(0.0, device=anomaly_scores.device)
                 average_precisions[i] = torch.tensor(0.0, anomaly_scores=self.device)
-        auroc = (aurocs * cluster_sizes / cluster_sizes.sum()).mean()
-        average_precision = (average_precisions * cluster_sizes / cluster_sizes.sum()).mean()
+        auroc = (aurocs * cluster_sizes / cluster_sizes.sum()).sum()
+        average_precision = (average_precisions * cluster_sizes / cluster_sizes.sum()).sum()
 
 
         metrics = {

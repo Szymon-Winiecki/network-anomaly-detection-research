@@ -233,8 +233,8 @@ class CAE(AEBase, IADModel):
             else:
                 aurocs[i] = torch.tensor(0.0, device=self.device)
                 average_precisions[i] = torch.tensor(0.0, device=self.device)
-        auroc = (aurocs * cluster_sizes / cluster_sizes.sum()).mean()
-        average_precision = (average_precisions * cluster_sizes / cluster_sizes.sum()).mean()
+        auroc = (aurocs * cluster_sizes / cluster_sizes.sum()).sum()
+        average_precision = (average_precisions * cluster_sizes / cluster_sizes.sum()).sum()
 
         self.log("val_accuracy", accuracy)
         self.log("val_precision", precision)
@@ -303,8 +303,8 @@ class CAE(AEBase, IADModel):
             else:
                 aurocs[i] = torch.tensor(0.0, device=self.device)
                 average_precisions[i] = torch.tensor(0.0, device=self.device)
-        auroc = (aurocs * cluster_sizes / cluster_sizes.sum()).mean()
-        average_precision = (average_precisions * cluster_sizes / cluster_sizes.sum()).mean()
+        auroc = (aurocs * cluster_sizes / cluster_sizes.sum()).sum()
+        average_precision = (average_precisions * cluster_sizes / cluster_sizes.sum()).sum()
 
         self.log("test_accuracy", accuracy)
         self.log("test_precision", precision)
