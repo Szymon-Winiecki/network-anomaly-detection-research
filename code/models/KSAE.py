@@ -40,7 +40,7 @@ class KSAE(IADModel):
             kmeans_fit_sample_size (int): Number of samples to fit the K-Means model. Samples are randomly selected from the data.
             kmeans_fit_quantile (float): Quantile to determine the outlier threshold for samples. 
                 K-Means is trained on samples with a magnitude lower than the threshold, to prevent outliers from affecting the clustering.
-            base_model (LightningModule): Autoencoder model class to be trained on each cluster.
+            base_model (IADModel class): Autoencoder model class to be trained on each cluster.
             **base_model_kwargs: Keyword arguments for the base model.
         """
 
@@ -161,9 +161,9 @@ class KSAE(IADModel):
         
         clusters = self.kmeans.predict(dataset.x.cpu().numpy())
 
-        aurocs = torch.zeros((self.kmeans_n_clusters), device=self.device)
-        average_precisions = torch.zeros((self.kmeans_n_clusters), device=self.device)
-        cluster_sizes = torch.zeros((self.kmeans_n_clusters), device=self.device)
+        aurocs = torch.zeros((self.kmeans_n_clusters), device=anomaly_scores.device)
+        average_precisions = torch.zeros((self.kmeans_n_clusters), device=anomaly_scores.device)
+        cluster_sizes = torch.zeros((self.kmeans_n_clusters), device=anomaly_scores.device)
         for i in range(self.kmeans_n_clusters):
             cluster_labels = labels[clusters == i]
             cluster_anomaly_scores = anomaly_scores[clusters == i]
@@ -172,25 +172,25 @@ class KSAE(IADModel):
                 aurocs[i] = tmf.auroc(cluster_anomaly_scores, cluster_labels, task="binary")
                 average_precisions[i] = tmf.average_precision(cluster_anomaly_scores, cluster_labels, task="binary")
             else:
-                aurocs[i] = torch.tensor(0.0, device=self.device)
-                average_precisions[i] = torch.tensor(0.0, device=self.device)
+                aurocs[i] = torch.tensor(0.0, device=anomaly_scores.device)
+                average_precisions[i] = torch.tensor(0.0, device=anomaly_scores.device)
         auroc = (aurocs * cluster_sizes / cluster_sizes.sum()).sum()
         average_precision = (average_precisions * cluster_sizes / cluster_sizes.sum()).sum()
 
         metrics = {
-            "test_accuracy": accuracy,
-            "test_precision": precision,
-            "test_recall": recall,
-            "test_specificity": specificity,
-            "test_f1": f1,
-            "test_auroc": auroc,
-            "test_average_precision": average_precision,
+            "test_accuracy": accuracy.item(),
+            "test_precision": precision.item(),
+            "test_recall": recall.item(),
+            "test_specificity": specificity.item(),
+            "test_f1": f1.item(),
+            "test_auroc": auroc.item(),
+            "test_average_precision": average_precision.item(),
         }
 
         for i in range(self.kmeans_n_clusters):
-            metrics[f"test_auroc_cluster_{i}"] = aurocs[i]
-            metrics[f"test_average_precision_cluster_{i}"] = average_precisions[i]
-            metrics[f"test_cluster_size_{i}"] = cluster_sizes[i]
+            metrics[f"test_auroc_cluster_{i}"] = aurocs[i].item()
+            metrics[f"test_average_precision_cluster_{i}"] = average_precisions[i].item()
+            metrics[f"test_cluster_size_{i}"] = cluster_sizes[i].item()
 
         return metrics
 

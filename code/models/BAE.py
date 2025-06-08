@@ -182,19 +182,19 @@ class BAE(IADModel):
 
 
         metrics = {
-            "test_accuracy": accuracy,
-            "test_precision": precision,
-            "test_recall": recall,
-            "test_specificity": specificity,
-            "test_f1": f1,
-            "test_auroc": auroc,
-            "test_average_precision": average_precision,
+            "test_accuracy": accuracy.item(),
+            "test_precision": precision.item(),
+            "test_recall": recall.item(),
+            "test_specificity": specificity.item(),
+            "test_f1": f1.item(),
+            "test_auroc": auroc.item(),
+            "test_average_precision": average_precision.item(),
         }
 
         for i in range(self.birch.n_clusters):
-            metrics[f"test_auroc_cluster_{i}"] = aurocs[i]
-            metrics[f"test_average_precision_cluster_{i}"] = average_precisions[i]
-            metrics[f"test_cluster_size_{i}"] = cluster_sizes[i]
+            metrics[f"test_auroc_cluster_{i}"] = aurocs[i].item()
+            metrics[f"test_average_precision_cluster_{i}"] = average_precisions[i].item()
+            metrics[f"test_cluster_size_{i}"] = cluster_sizes[i].item()
 
         return metrics
 
