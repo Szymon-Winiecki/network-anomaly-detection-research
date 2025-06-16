@@ -60,6 +60,24 @@ def load_dataset(name, path, pipeline=None, random_state=42):
         "val": val_dataset,
         "test": test_dataset
     }
+
+def load_dataset_train_test(name, path, pipeline=None, random_state=42):
+    """ Load the train and test datasets from the given path.
+    Args:
+        name (str): Name of the dataset.
+        path (str): Path to the dataset directory.
+        pipeline (Pipeline, optional): Optional transformer to be applied on a sample.
+        random_state (int): Random state for reproducibility.
+    Returns:
+        dict: Dictionary containing train and test datasets.
+    """
+    train_dataset = IDS_Dataset(path, "train", strategy="train_test", name=name, transformer=pipeline, random_state=random_state)
+    test_dataset = IDS_Dataset(path, "test", strategy="train_test", name=name, transformer=pipeline, random_state=random_state)
+
+    return {
+        "train": train_dataset,
+        "test": test_dataset
+    }
     
 def load_dataset_folds(dataset_name, dataset_dir, kfolds=3, pipeline=None, random_state=42):
     """ Load K folds of the dataset from the given directory for a modified cross_validation.
@@ -233,3 +251,70 @@ def run_cross_validation(model : IADModel,
         models.append(new_model)
 
     return records, models
+
+def run_experiment_n_times(model : IADModel, 
+                            dataset : dict,
+                            max_epochs : int = 10,
+                            trainer_callbacks = None,
+                            experiment_name : str = "undefined",
+                            run_name : str = "undefined",
+                            validation_set : str = "val",
+                            save_model : bool = False,
+                            fit_params = {},
+                            n_runs : int = 3):
+    
+    """ Run an experiment n times with the given model and dataset.
+    Args:
+        model (IADModel): Model to train and evaluate.
+        dataset (dict): Dictionary containing train and validation datasets.
+        max_epochs (int): Maximum number of epochs to train the model.
+        experiment_name (str): Name of the experiment.
+        run_name (str): Name of the run.
+        validation_set (str): Type of the set to use for evaluation. Possible values are "val" or "test". Default is "val".
+        save_model (bool): Whether to save the model after training.
+        fit_params: Additional parameters to pass to the fit method.
+        n_runs (int): Number of runs to perform.
+    Returns:
+        records (list): List of dictionaries containing the experiment records for each run.
+    """
+
+    records = []
+
+    id = int((datetime.now().timestamp() - datetime(2025, 1, 1).timestamp()) * 100)
+
+    for i in range(n_runs):
+
+        model_hparams = model.hparams.copy()
+        model_sub_kwargs = {}
+
+        to_delete = []
+        for key, value in model_hparams.items():
+            if 'kwargs' in key:
+                model_sub_kwargs = model_sub_kwargs | value
+                to_delete.append(key)
+
+        for key in to_delete:
+            del model_hparams[key]
+
+        model_params = model_hparams | model_sub_kwargs
+
+        new_model = model.__class__(**model_params)
+
+        record = run_experiment(
+            new_model, 
+            dataset, 
+            max_epochs=max_epochs, 
+            trainer_callbacks=trainer_callbacks,
+            experiment_name=experiment_name,
+            run_name=f"{run_name}_v{i}",
+            validation_set=validation_set,
+            save_model=save_model,
+            fit_params=fit_params
+        )
+
+        record['pack_id'] = id
+        record['run_id'] = i
+
+        records.append(record)
+
+    return records
