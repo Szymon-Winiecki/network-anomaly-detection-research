@@ -177,9 +177,6 @@ class CAE(AEBase, IADModel):
 
 
         self.log("train_loss", losses.mean())
-        self.log("train_loss_std", losses.std())
-        self.log("min_loss", losses.min())
-        self.log("max_loss", losses.max())
         self.log("re_loss", re_losses.mean())
         self.log("clustering_loss", clustering_losses.mean())
         self.log("centering_loss", centering_losses.mean())

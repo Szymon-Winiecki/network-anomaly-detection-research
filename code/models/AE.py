@@ -100,9 +100,6 @@ class AE(AEBase, IADModel):
         self.threshold = losses.quantile(self.threshold_quantile)
 
         self.log("train_loss", losses.mean())
-        self.log("train_loss_std", losses.std())
-        self.log("min_loss", losses.min())
-        self.log("max_loss", losses.max())
 
         self.log("threshold", self.threshold)
 

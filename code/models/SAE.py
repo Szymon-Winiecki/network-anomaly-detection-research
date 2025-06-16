@@ -11,15 +11,13 @@ import torchmetrics.functional as tmf
 
 from sklearn.svm import OneClassSVM
 from sklearn.mixture import GaussianMixture
-from sklearn.decomposition import PCA
 from sklearn.neighbors import LocalOutlierFactor
 
 import numpy as np
 
-import matplotlib.pyplot as plt
-
 from IADModel import IADModel
 from AEBase import AEBase
+
 
 class SAE(AEBase, IADModel):
     """ Shrink Autoencoder model 
@@ -164,9 +162,6 @@ class SAE(AEBase, IADModel):
                 self.log("lof_offset", self.classifier.offset_)
 
         self.log("train_loss", losses.mean())
-        self.log("train_loss_std", losses.std())
-        self.log("min_loss", losses.min())
-        self.log("max_loss", losses.max())
 
         self.log("learning_rate", self.trainer.optimizers[0].param_groups[0]["lr"])
 
@@ -315,7 +310,7 @@ class SAE(AEBase, IADModel):
         else:
             logger = None
 
-        trainer = L.Trainer(accelerator=self.tech_params["accelerator"], max_epochs=max_epochs, logger=logger)
+        trainer = L.Trainer(accelerator=self.tech_params["accelerator"], max_epochs=max_epochs, callbacks=trainer_callbacks, logger=logger)
 
         # for some strange reason, mlflow logger always saves two copies of the checkpoint
         # First (desired) in mlartifacts folder and the second (unwanted) in the notebook's dir
@@ -417,48 +412,6 @@ class SAE(AEBase, IADModel):
     @staticmethod
     def load(path):
         raise NotImplementedError("Load method not implemented")
-
-    def plot_latent_space(self, dataset, save_path=None):
-        """ Plot the latent space of the model
-
-        Args:
-            dataset (torch.utils.data.Dataset): Dataset to plot
-            save_path (str, optional): Path to save the plot. Defaults to None.
-        """
-        dataloader = self._get_loader(dataset, shuffle=False)
-
-        latents = []
-        labels = []
-
-        with torch.no_grad():
-            for batch in dataloader:
-                x, y, _ = batch
-                x = x.to(self.device)
-                x_latent = self.encoder(x)
-
-                latents.append(x_latent)
-                labels.append(y)
-
-        latents = torch.cat(latents).cpu().numpy()
-        labels = torch.cat(labels).cpu().numpy()
-
-        pca = PCA(n_components=2)
-        pca.fit(latents)
-        x = pca.transform(latents)
-
-        fig, ax = plt.subplots(figsize=(10, 10))
-        scatter = ax.scatter(x[:, 0], x[:, 1], c=labels, cmap='viridis', alpha=0.5)
-        ax.set_xlim(-1, 1)
-        ax.set_ylim(-1, 1)
-        ax.set_title("Latent Space")
-        ax.set_xlabel("PC1")
-        ax.set_ylabel("PC2")
-        legend = ax.legend(*scatter.legend_elements(), title="Classes")
-        ax.add_artist(legend)
-        if save_path:
-            plt.savefig(save_path)
-        else:
-            plt.show()
 
     def _calc_loss(self, x : torch.Tensor, x_recon : torch.Tensor, x_latent : torch.Tensor):
         """ Calculate the loss for the SAE model for each sample
