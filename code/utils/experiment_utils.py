@@ -88,10 +88,12 @@ def load_dataset_folds(dataset_name, dataset_dir, kfolds=3, pipeline=None, rando
 def run_experiment(model : IADModel, 
                    dataset : dict,
                    max_epochs : int = 10,
+                   trainer_callbacks = None,
                    experiment_name : str = "undefined",
                    run_name : str = "undefined",
                    validation_set : str = "val",
-                   save_model : bool = False):
+                   save_model : bool = False,
+                   fit_params = {}):
     
     """ Run an experiment with the given model and dataset.
     Args:
@@ -102,6 +104,7 @@ def run_experiment(model : IADModel,
         run_name (str): Name of the run.
         validation_set (str): Type of the set to use for evaluation. Possible values are "val" or "test". Default is "val".
         save_model (bool): Whether to save the model after training.
+        fit_params (dict): Additional parameters to pass to the fit method.
     Returns:
         experiment_record (dict): Dictionary containing the experiment record with all parameters and metrics.
     """
@@ -114,13 +117,14 @@ def run_experiment(model : IADModel,
     )
 
     fit_start_time = datetime.now()
-    metrics = model.fit(dataset['train'], dataset[validation_set], max_epochs=max_epochs, log=True, 
+    metrics = model.fit(dataset['train'], dataset[validation_set], max_epochs=max_epochs, trainer_callbacks=trainer_callbacks, log=True, 
                         logger_params = {
                                 "experiment_name": experiment_name,
                                 "run_name": run_name,
                                 "log_model": False,
                                 "tags": {"dataset": dataset['train'].name},
-                        })
+                        },
+                        **fit_params)
     fit_end_time = datetime.now()
     
     
@@ -168,9 +172,11 @@ def run_experiment(model : IADModel,
 def run_cross_validation(model : IADModel, 
                          dataset_folds : list,
                          max_epochs : int = 10,
+                         trainer_callbacks = None,
                          experiment_name : str = "undefined",
                          run_name : str = "undefined",
-                         save_model : bool = False):
+                         save_model : bool = False,
+                         fit_params = {}):
     """ Run modified cross-validation with the given model and dataset folds.
     Args:
         model (IADModel): Blueprint of the model to train and evaluate.
@@ -179,6 +185,7 @@ def run_cross_validation(model : IADModel,
         experiment_name (str): Name of the experiment.
         run_name (str): Base name for the runs.
         save_model (bool): Whether to save the models after training.
+        fit_params (dict): Additional parameters to pass to the fit method.
     Returns:
         records (list): List of dictionaries containing the experiment records for each fold.
         models (list): List of models trained for each fold.
@@ -212,10 +219,12 @@ def run_cross_validation(model : IADModel,
             new_model, 
             fold, 
             max_epochs=max_epochs, 
+            trainer_callbacks=trainer_callbacks,
             experiment_name=experiment_name,
             run_name=f"{run_name}_fold_{i}",
             validation_set="val",
-            save_model=save_model
+            save_model=save_model,
+            fit_params=fit_params
         )
         record['cv_id'] = cv_id
         record['cv_fold'] = i

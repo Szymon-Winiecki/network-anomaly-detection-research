@@ -52,6 +52,7 @@ class AE(AEBase, IADModel):
             scheduler_params=scheduler_params,
             threshold_quantile=threshold_quantile,
         )
+        IADModel.__init__(self, name="AE")
 
         self.threshold_quantile = threshold_quantile
 
@@ -64,6 +65,7 @@ class AE(AEBase, IADModel):
         # Store the losses and labels to compute metrics at the end of the epoch
         self.validation_step_losses = []
         self.validation_step_labels = []
+        self.validation_step_latents = []  # For latent space visualization
 
         self.test_step_losses = []
         self.test_step_labels = []
@@ -110,12 +112,14 @@ class AE(AEBase, IADModel):
 
     def validation_step(self, batch, batch_idx):
         x, y, attack_cat = batch
-        x_recon = self.forward(x)
+        x_latent = self.encoder(x)
+        x_recon = self.decoder(x_latent)
 
         loss = self._calc_loss(x, x_recon)
             
         self.validation_step_losses.append(loss)
         self.validation_step_labels.append(y)
+        self.validation_step_latents.append(x_latent)
  
         return loss.mean()
     
@@ -152,6 +156,7 @@ class AE(AEBase, IADModel):
         # Reset the losses and labels for the next epoch
         self.validation_step_losses.clear()
         self.validation_step_labels.clear()
+        self.validation_step_latents.clear()
 
     def test_step(self, batch, batch_idx):
         x, y, attack_cat = batch
@@ -223,6 +228,7 @@ class AE(AEBase, IADModel):
             train_dataset, 
             val_dataset = None, 
             max_epochs=10, 
+            trainer_callbacks = None,
             log=False, 
             logger_params={},
             random_state=None):
@@ -233,7 +239,7 @@ class AE(AEBase, IADModel):
         else:
             logger = None
 
-        trainer = L.Trainer(accelerator=self.tech_params["accelerator"], max_epochs=max_epochs, logger=logger)
+        trainer = L.Trainer(accelerator=self.tech_params["accelerator"], max_epochs=max_epochs, callbacks=trainer_callbacks, logger=logger)
 
         # for some strange reason, mlflow logger always saves two copies of the checkpoint
         # First (desired) in mlartifacts folder and the second (unwanted) in the notebook's dir

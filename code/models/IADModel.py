@@ -23,7 +23,8 @@ class IADModel(ABC):
 
     default_model_save_dir = Path("saved_models")
 
-    def __init__(self, **kwargs):
+    def __init__(self, name = "unknown", **kwargs):
+        self.name = name
         self.set_tech_params()
 
     @abstractmethod
@@ -31,6 +32,7 @@ class IADModel(ABC):
             train_dataset: Dataset, 
             val_dataset: Dataset = None, 
             max_epochs = 10, 
+            trainer_callbacks = None,
             log = False, 
             logger_params = {},
             random_state = None) -> dict:

@@ -44,7 +44,7 @@ class KSAE(IADModel):
             **base_model_kwargs: Keyword arguments for the base model.
         """
 
-        IADModel.__init__(self)
+        IADModel.__init__(self, name="KSAE")
 
         # store hyperparameters to allow saving and loading the model 
         self.hparams = {
@@ -69,6 +69,7 @@ class KSAE(IADModel):
             train_dataset, 
             val_dataset = None,
             max_epochs = 10,
+            trainer_callbacks = None,
             log = False,
             logger_params = {},
             random_state = None):
@@ -130,7 +131,8 @@ class KSAE(IADModel):
             cluster_model.fit(
                 cluster_train_dataset,
                 val_dataset = cluster_val_dataset,
-                max_epochs = max_epochs,
+                max_epochs = adj_max_epochs,
+                trainer_callbacks = trainer_callbacks,
                 log = log,
                 logger_params = cluster_model_logger_params,
                 random_state = random_state

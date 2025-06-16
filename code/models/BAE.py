@@ -45,7 +45,7 @@ class BAE(IADModel):
             **base_model_kwargs: Keyword arguments for the base model.
         """
 
-        IADModel.__init__(self)
+        IADModel.__init__(self, name = "BAE")
 
         # store hyperparameters to allow saving and loading model 
         self.hparams = {
@@ -71,6 +71,7 @@ class BAE(IADModel):
             train_dataset, 
             val_dataset = None,
             max_epochs = 10,
+            trainer_callbacks = None,
             log = False,
             logger_params = {},
             random_state = None):
@@ -133,6 +134,7 @@ class BAE(IADModel):
                 cluster_train_dataset,
                 val_dataset = cluster_val_dataset,
                 max_epochs = max_epochs,
+                trainer_callbacks = trainer_callbacks,
                 log = log,
                 logger_params = cluster_model_logger_params,
                 random_state = random_state
