@@ -502,3 +502,28 @@ class CAE(AEBase, IADModel):
             preds[clusters == i] = anomaly_scores[clusters == i] > self.thresholds[i]
 
         return preds
+    
+    def calc_ROC(self, dataset):
+        """ Calculate the ROC curve for the model on the given dataset """
+
+        scores, labels, clusters = self.predict_raw_and_clusters(dataset)
+
+        fprs = []
+        tprs = []
+        aurocs = []
+        cluster_sizes = []
+
+        for i in range(self.num_clusters):
+            cluster_scores = scores[clusters == i]
+            cluster_labels = labels[clusters == i]
+            if len(cluster_labels) > 0:
+                fpr, tpr, thresholds = tmf.roc(cluster_scores, cluster_labels, task="binary")
+                auroc = tmf.auroc(cluster_scores, cluster_labels, task="binary")
+
+            cluster_sizes.append(cluster_labels.shape[0])
+            fprs.append(fpr.cpu().numpy())
+            tprs.append(tpr.cpu().numpy())
+            aurocs.append(auroc.item())
+
+
+        return fprs, tprs, aurocs, cluster_sizes

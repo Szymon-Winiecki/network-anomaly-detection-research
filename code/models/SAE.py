@@ -515,3 +515,16 @@ class SAE(AEBase, IADModel):
             fit_sample = latents[fit_sample_indices].detach().cpu().numpy()
 
         self.classifier.fit(fit_sample)
+
+    def calc_ROC(self, dataset):
+        """ Calculate the ROC curve for the model on the given dataset """
+
+        scores = self.predict_raw(dataset)
+        labels = dataset.y
+
+        fpr, tpr, thresholds = tmf.roc(scores, labels, task="binary")
+        auroc = tmf.auroc(scores, labels, task="binary")
+
+        cluster_size = labels.shape[0]
+
+        return [fpr], [tpr], [auroc], [cluster_size]

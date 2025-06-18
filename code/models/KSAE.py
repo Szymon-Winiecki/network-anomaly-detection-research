@@ -214,10 +214,11 @@ class KSAE(IADModel):
 
         return predictions
     
-    def predict_raw(self, dataset):
+    def predict_raw_and_clusters(self, dataset):
 
         # get the cluster labels for each sample
         clusters = self.kmeans.predict(dataset.x.cpu().numpy())
+        labels = dataset.y.cpu().numpy()
 
         # make predictions for all samples with each autoencoder
         independent_predictions = []
@@ -230,7 +231,10 @@ class KSAE(IADModel):
         clusters = torch.tensor(clusters, device=predictions.device)
         predictions = predictions[torch.arange(predictions.size(0)), clusters]
 
-        return predictions
+        return predictions, labels, clusters
+    
+    def predict_raw(self, dataset):
+        return self.predict_raw_and_clusters(dataset)[0]
     
     def save(self, path = None):
         
@@ -289,3 +293,28 @@ class KSAE(IADModel):
         filtered_dataset = TensorDataset(x, y, attack_cat)
 
         return filtered_dataset
+    
+    def calc_ROC(self, dataset):
+        """ Calculate the ROC curve for the model on the given dataset """
+
+        scores, labels, clusters = self.predict_raw_and_clusters(dataset)
+
+        fprs = []
+        tprs = []
+        aurocs = []
+        cluster_sizes = []
+
+        for i in range(self.kmeans_n_clusters):
+            cluster_scores = torch.tensor(scores[clusters == i])
+            cluster_labels = torch.tensor(labels[clusters == i])
+            if len(cluster_labels) > 0:
+                fpr, tpr, thresholds = tmf.roc(cluster_scores, cluster_labels, task="binary")
+                auroc = tmf.auroc(cluster_scores, cluster_labels, task="binary")
+
+            cluster_sizes.append(cluster_labels.shape[0])
+            fprs.append(fpr.cpu().numpy())
+            tprs.append(tpr.cpu().numpy())
+            aurocs.append(auroc.item())
+
+
+        return fprs, tprs, aurocs, cluster_sizes

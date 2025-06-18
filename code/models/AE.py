@@ -351,3 +351,35 @@ class AE(AEBase, IADModel):
     def _calc_loss(self, x, x_recon):
         """ Calculate the reconstruction loss for each sample in x"""
         return F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
+    
+    def calc_ROC(self, dataset):
+        """ Calculate the ROC curve for the model on the given dataset """
+        self.threshold = self.threshold.to(device=self.device)
+
+        dataloader = self._get_loader(dataset, shuffle=False)
+
+        scores = []
+        labels = []
+
+        with torch.no_grad():
+            for x, y, _ in dataloader:
+                x = x.to(device=self.device)
+                x_recon = self.forward(x)
+                loss = self._calc_loss(x, x_recon)
+                score = F.tanh(loss)
+
+                scores.append(score)
+                labels.append(y)
+
+        scores = torch.cat(scores)
+        labels = torch.cat(labels)
+
+        fpr, tpr, thresholds = tmf.roc(scores, labels, task="binary")
+        auroc = tmf.auroc(scores, labels, task="binary")
+
+        fpr = fpr.cpu().numpy()
+        tpr = tpr.cpu().numpy()
+        auroc = auroc.item()
+        cluster_size = len(labels)
+
+        return [fpr], [tpr], [auroc], [cluster_size]
