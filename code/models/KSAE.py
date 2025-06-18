@@ -160,6 +160,7 @@ class KSAE(IADModel):
         recall = tmf.recall(preds, labels, task="binary")
         specificity = tmf.specificity(preds, labels, task="binary")
         f1 = tmf.f1_score(preds, labels, task="binary")
+        mcc = tmf.matthews_corrcoef(preds, labels, task="binary")
         
         clusters = self.kmeans.predict(dataset.x.cpu().numpy())
 
@@ -185,6 +186,7 @@ class KSAE(IADModel):
             "test_recall": recall.item(),
             "test_specificity": specificity.item(),
             "test_f1": f1.item(),
+            "test_mcc": mcc.item(),
             "test_auroc": auroc.item(),
             "test_average_precision": average_precision.item(),
         }

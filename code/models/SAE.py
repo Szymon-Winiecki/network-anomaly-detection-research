@@ -210,6 +210,7 @@ class SAE(AEBase, IADModel):
             recall = tmf.recall(preds, labels, task="binary")
             specificity = tmf.specificity(preds, labels, task="binary")
             f1 = tmf.f1_score(preds, labels, task="binary")
+            mcc = tmf.matthews_corrcoef(preds, labels, task="binary")
 
             if self.occ_algorithm == "re":
                 auroc = tmf.auroc(F.tanh(anomaly_scores), labels, task="binary")
@@ -223,6 +224,7 @@ class SAE(AEBase, IADModel):
             self.log("val_recall", recall)
             self.log("val_specificity", specificity)
             self.log("val_f1", f1)
+            self.log("val_mcc", mcc)
             self.log("val_auroc", auroc)
             self.log("val_average_precision", average_precision)
 
@@ -267,6 +269,7 @@ class SAE(AEBase, IADModel):
         recall = tmf.recall(preds, labels, task="binary")
         specificity = tmf.specificity(preds, labels, task="binary")
         f1 = tmf.f1_score(preds, labels, task="binary")
+        mcc = tmf.matthews_corrcoef(preds, labels, task="binary")
         
         if self.occ_algorithm == "re":
             auroc = tmf.auroc(F.tanh(anomaly_scores), labels, task="binary")
@@ -280,6 +283,7 @@ class SAE(AEBase, IADModel):
         self.log("test_recall", recall)
         self.log("test_specificity", specificity)
         self.log("test_f1", f1)
+        self.log("test_mcc", mcc)
         self.log("test_auroc", auroc)
         self.log("test_average_precision", average_precision)
 
