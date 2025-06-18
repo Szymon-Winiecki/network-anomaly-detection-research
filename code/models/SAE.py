@@ -104,6 +104,7 @@ class SAE(AEBase, IADModel):
         self.validation_step_scores = []
         self.validation_step_preds = []
         self.validation_step_labels = []
+        self.validation_step_latents = []
 
         self.test_step_socores = []
         self.test_step_preds = []
@@ -173,7 +174,8 @@ class SAE(AEBase, IADModel):
         
         if self.occ_algorithm == "re":
             x, y , attack_cat = batch
-            x_recon = self.forward(x)
+            x_latent = self.encoder(x)
+            x_recon = self.decoder(x_latent)
 
             anomaly_score = F.mse_loss(x, x_recon, reduction="none").mean(dim=1)
 
@@ -182,6 +184,7 @@ class SAE(AEBase, IADModel):
             self.validation_step_scores.append(anomaly_score)
             self.validation_step_preds.append(preds)
             self.validation_step_labels.append(y)
+            self.validation_step_latents.append(x_latent)
 
         elif self._if_val_occ_this_epoch():
             x, y, attack_cat = batch
@@ -193,12 +196,12 @@ class SAE(AEBase, IADModel):
             self.validation_step_scores.append(anomaly_score)
             self.validation_step_preds.append(preds)
             self.validation_step_labels.append(y)
+            self.validation_step_latents.append(x_latent)
  
         return 0
     
     def on_validation_epoch_end(self):
         
-
         if self.occ_algorithm == "re" or self._if_val_occ_this_epoch():
             # Concatenate all losses and labels of the samples in the validation step
             anomaly_scores = torch.cat(self.validation_step_scores)
@@ -235,6 +238,7 @@ class SAE(AEBase, IADModel):
             self.validation_step_scores.clear()
             self.validation_step_preds.clear()
             self.validation_step_labels.clear()
+            self.validation_step_latents.clear()
 
     def test_step(self, batch, batch_idx):
         x, y, attack_cat = batch
