@@ -8,9 +8,7 @@ import torch
 
 import torchmetrics.functional as tmf
 
-from sklearn.decomposition import PCA
-
-import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
 
 from IADModel import IADModel
 from AEBase import AEBase
@@ -126,7 +124,10 @@ class CAE(AEBase, IADModel):
 
         if self.choose_centers:
             # in the first batch of the first epoch choose cluseter centers as a random samples from the latent space
-            self.cluster_centers = x_latent[torch.randperm(x_latent.shape[0])[:self.num_clusters]].detach()
+            kmeans = KMeans(n_clusters=self.num_clusters)
+            kmeans.fit(x_latent.detach().cpu().numpy())
+            centroids = torch.Tensor(kmeans.cluster_centers_).type_as(x_latent).to(self.device)
+            self.cluster_centers = centroids
             self.choose_centers = False
 
         distances_to_the_closest_center, clusters = self._calc_clusters(x_latent)
@@ -464,6 +465,7 @@ class CAE(AEBase, IADModel):
         Returns:
             tuple: Distances to the closest cluster center (torch.Tensor), clusters (Torch.tensor)
         """
+        self.cluster_centers = self.cluster_centers.to(self.device)
         distances_to_centers = torch.zeros((x_latent.shape[0], self.num_clusters), device=self.device)
         for i in range(self.num_clusters):
             distances_to_centers[:, i] = torch.linalg.vector_norm(x_latent - self.cluster_centers[i], ord=2, dim=1)
