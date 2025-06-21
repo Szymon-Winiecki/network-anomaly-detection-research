@@ -56,11 +56,12 @@ class AE(AEBase, IADModel):
 
         self.threshold_quantile = threshold_quantile
 
-        self.threshold = 0
+        self.threshold = torch.tensor(0.0, device=self.device)
 
         # Store the losses of each sample in each train step in epoch
         # to compute anomaly detection threshold
         self.train_step_losses = []
+        self.train_step_latents = []  # For latent space visualization
 
         # Store the losses and labels to compute metrics at the end of the epoch
         self.validation_step_losses = []
@@ -85,10 +86,12 @@ class AE(AEBase, IADModel):
     
     def training_step(self, batch, batch_idx):
         x, _, _ = batch
-        x_recon = self.forward(x)
+        x_latent = self.encoder(x)
+        x_recon = self.decoder(x_latent)
         loss = self._calc_loss(x, x_recon)
 
         self.train_step_losses.append(loss.detach().clone())
+        self.train_step_latents.append(x_latent.detach().clone())
 
         loss = loss.mean()
 
@@ -106,6 +109,7 @@ class AE(AEBase, IADModel):
         self.log("learning_rate", self.trainer.optimizers[0].param_groups[0]["lr"])
 
         self.train_step_losses.clear()
+        self.train_step_latents.clear()
 
     def validation_step(self, batch, batch_idx):
         x, y, attack_cat = batch

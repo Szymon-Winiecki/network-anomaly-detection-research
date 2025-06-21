@@ -32,9 +32,15 @@ class LatentSpacePlotter(Callback):
 
         self.plot_epochs = plot_epochs
 
+        self.file_num = 0
+
     def on_validation_epoch_end(self, trainer, pl_module):
         if trainer.sanity_checking:
             return
+        
+        if trainer.current_epoch == 0:
+            self.file_num += 1
+
         if trainer.current_epoch not in self.plot_epochs:
             return
         
@@ -52,7 +58,7 @@ class LatentSpacePlotter(Callback):
         labels = torch.cat(labels).cpu().numpy()
         
         time_id = int((datetime.now().timestamp() - datetime(2025, 1, 1).timestamp()) * 100)
-        save_path = self.save_dir / f"{self.filename}_{time_id}_{pl_module.name}_{self.dataset_name}_epoch_{trainer.current_epoch}.png"
+        save_path = self.save_dir / f"{self.filename}_{self.file_num}_{time_id}_{pl_module.name}_{self.dataset_name}_epoch_{trainer.current_epoch}.png"
         
         plot_latent_space(latents, labels, pl_module.name, self.dataset_name, save_path=save_path)
         

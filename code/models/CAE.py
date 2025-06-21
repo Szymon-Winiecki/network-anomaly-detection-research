@@ -71,7 +71,7 @@ class CAE(AEBase, IADModel):
             centering_force=centering_force,
             threshold_quantile=threshold_quantile
         )
-        IADModel.__init__(self, name="CAE")
+        IADModel.__init__(self, name="CAE(M-CEN)")
 
         self.clustering_force = clustering_force
         self.centering_force = centering_force
