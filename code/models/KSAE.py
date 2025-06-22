@@ -28,6 +28,13 @@ class KSAE(IADModel):
         2019, pp. 1-5, doi: 10.1109/KSE.2019.8919446.
     """
 
+    occ_algorithm_acronyms = {
+        "centroid": "CEN",
+        "lof": "LOF",
+        "svm": "OCSVM",
+        "re": "RE"
+    }
+
     def __init__(self, 
                  kmeans_n_clusters : int, 
                  kmeans_fit_sample_size : int,
@@ -46,7 +53,8 @@ class KSAE(IADModel):
             **base_model_kwargs: Keyword arguments for the base model.
         """
 
-        IADModel.__init__(self, name="KSAE")
+        occ_algorithm = base_model_kwargs.get("occ_algorithm", "centroid")
+        IADModel.__init__(self, name=f"KSAE({self.occ_algorithm_acronyms.get(occ_algorithm, occ_algorithm)})")
 
         # store hyperparameters to allow saving and loading the model 
         self.hparams = {

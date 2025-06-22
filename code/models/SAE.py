@@ -28,6 +28,13 @@ class SAE(AEBase, IADModel):
     pp. 3074-3087, Aug. 2019, doi: 10.1109/TCYB.2018.2838668
     """
 
+    occ_algorithm_acronyms = {
+        "centroid": "CEN",
+        "lof": "LOF",
+        "svm": "OCSVM",
+        "re": "RE"
+    }
+
     def __init__(self, 
                  input_size : int, 
                  hidden_sizes : list[int], 
@@ -82,6 +89,7 @@ class SAE(AEBase, IADModel):
             occ_fit_sample_size=occ_fit_sample_size,
             **occ_kwargs
         )
+        IADModel.__init__(self, name=f"SAE({self.occ_algorithm_acronyms.get(occ_algorithm, occ_algorithm)})")
 
         self.shrink_weight = lmb
 
