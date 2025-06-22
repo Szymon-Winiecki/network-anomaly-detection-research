@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import copy
+
 from sklearn.cluster import Birch
 
 from torch.utils.data import TensorDataset
@@ -74,7 +76,8 @@ class BAE(IADModel):
             trainer_callbacks = None,
             log = False,
             logger_params = {},
-            random_state = None):
+            random_state = None,
+            adjust_epochs = True):
         
         logger_params = self.default_logger_params | logger_params
 
@@ -122,7 +125,19 @@ class BAE(IADModel):
         # fit autoencoder model on each cluster
         self.autoencoders = []
         for i, (cluster_train_dataset, cluster_val_dataset) in enumerate(zip(cluster_train_datasets, cluster_val_datasets)):
-            cluster_model = self.base_model(**self.base_model_kwargs)
+
+            adj_base_model_kwargs = copy.deepcopy(self.base_model_kwargs)
+            adj_max_epochs = max_epochs
+            if adjust_epochs:
+                scaling_factor = (len(train_dataset) / self.birch.n_clusters) / len(cluster_train_dataset)
+                scaling_factor = max(scaling_factor, 1.0)
+                scaling_factor = min(scaling_factor, 3.0)
+                adj_max_epochs = int(max_epochs * scaling_factor)
+
+                if self.base_model_kwargs["scheduler"] == "StepLR":
+                    adj_base_model_kwargs["scheduler_params"]["step_size"] = int(self.base_model_kwargs["scheduler_params"]["step_size"] * scaling_factor)
+
+            cluster_model = self.base_model(**adj_base_model_kwargs)
 
             cluster_model.set_tech_params(**self.tech_params)
 
@@ -133,7 +148,7 @@ class BAE(IADModel):
             cluster_model.fit(
                 cluster_train_dataset,
                 val_dataset = cluster_val_dataset,
-                max_epochs = max_epochs,
+                max_epochs = adj_max_epochs,
                 trainer_callbacks = trainer_callbacks,
                 log = log,
                 logger_params = cluster_model_logger_params,
