@@ -208,26 +208,52 @@ class AE(AEBase, IADModel):
         pred = loss > self.threshold
         return pred
     
-    def adjust_threshold(self, score, y):
-        """
-        Adjust the thrshold to achieve best F1 score.
-        
-        Args:
-            score (torch.Tensor): The anomaly scores.
-            y (torch.Tensor): The labels.
-        """
+    def revert_threshold(self, revert_data):
 
-        thresholds = torch.linspace(0, 1, 500)
-        f1_scores = []
+        self.threshold = revert_data["threshold"]
+        self.threshold_quantile = revert_data["threshold_quantile"]
+    
+    def set_threshold_quantile(self, train_dataset, quantile):
 
-        for t in thresholds:
-            preds = score > t
-            f1 = tmf.binary_f1_score(preds, y)
-            f1_scores.append(f1)
+        revert_data = {
+            "threshold": self.threshold,
+            "threshold_quantile": self.threshold_quantile,
+        }
 
-        best_threshold = thresholds[torch.argmax(torch.tensor(f1_scores))]
+        self.threshold_quantile = quantile
 
-        self.threshold = best_threshold
+        train_loader = self._get_loader(train_dataset, shuffle=True)
+
+        model_state = self.training
+
+        self.eval()
+
+        with torch.no_grad():
+            train_losses = []
+            for batch in train_loader:
+                x, _, _ = batch
+                x_recon = self.forward(x)
+                loss = self._calc_loss(x, x_recon)
+                train_losses.append(loss.detach().clone())
+
+            train_losses = torch.cat(train_losses)
+
+        self.train(model_state)
+
+        self.threshold = train_losses.quantile(self.threshold_quantile)
+
+        return revert_data
+
+    def test_threshold_quantile(self, train_dataset, val_dataset, quantile):
+
+        revert_data = self.set_threshold_quantile(train_dataset, quantile)
+
+        metrics = self.evaluate(val_dataset, logger_params=None)
+
+        self.revert_threshold(revert_data)
+
+        return metrics
+
 
     def fit(self, 
             train_dataset, 
@@ -304,7 +330,6 @@ class AE(AEBase, IADModel):
 
 
     def predict_raw(self, dataset):
-        self.threshold = self.threshold.to(device=self.device)
 
         model_mode = self.training
         self.eval()

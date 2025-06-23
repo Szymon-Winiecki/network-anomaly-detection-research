@@ -163,12 +163,9 @@ class SAE(AEBase, IADModel):
             
             self._fit_occ(latents)
 
-            if self.occ_algorithm == "centroid":
-                anomaly_scores = self._calc_anomaly_score(latents)
-                self.cen_dst_threshold = anomaly_scores.quantile(self.threshold_quantile)
-                self.log("cen_dst_threshold", self.cen_dst_threshold)
-            elif self.occ_algorithm == "lof":
-                self.log("lof_offset", self.classifier.offset_)
+            anomaly_scores = self._calc_anomaly_score(latents)
+            self.threshold = anomaly_scores.quantile(self.threshold_quantile)
+            self.log("threshold", self.threshold)
 
         self.log("train_loss", losses.mean())
 
@@ -203,6 +200,12 @@ class SAE(AEBase, IADModel):
             
             self.validation_step_scores.append(anomaly_score)
             self.validation_step_preds.append(preds)
+            self.validation_step_labels.append(y)
+            self.validation_step_latents.append(x_latent)
+
+        else:
+            x, y, attack_cat = batch
+            x_latent = self.encoder(x)
             self.validation_step_labels.append(y)
             self.validation_step_latents.append(x_latent)
  
@@ -247,6 +250,10 @@ class SAE(AEBase, IADModel):
             self.validation_step_preds.clear()
             self.validation_step_labels.clear()
             self.validation_step_latents.clear()
+
+        else:
+            self.validation_step_latents.clear()
+            self.validation_step_labels.clear()
 
     def test_step(self, batch, batch_idx):
         x, y, attack_cat = batch
@@ -311,11 +318,73 @@ class SAE(AEBase, IADModel):
         preds = self._calc_predictions(x_latent)
 
         return preds
+    
+
+    def revert_threshold(self, revert_data):
+
+        self.threshold = revert_data["threshold"]
+        self.threshold_quantile = revert_data["threshold_quantile"]
+    
+    def set_threshold_quantile(self, train_dataset, quantile):
+
+        revert_data = {
+            "threshold": self.threshold,
+            "threshold_quantile": self.threshold_quantile,
+        }
+
+        self.threshold_quantile = quantile
+
+        train_loader = self._get_loader(train_dataset, shuffle=True)
+
+        model_state = self.training
+
+        self.eval()
+
+        with torch.no_grad():
+
+            if self.occ_algorithm == "re":
+                train_losses = []
+                for batch in train_loader:
+                    x, _, _ = batch
+                    x_recon = self.forward(x)
+                    loss = self._calc_loss(x, x_recon)
+                    train_losses.append(loss.detach().clone())
+
+                train_losses = torch.cat(train_losses)
+
+            else:
+                train_latents = []
+                for batch in train_loader:
+                    x, _, _ = batch
+                    x_latent = self.encoder(x)
+                    train_latents.append(x_latent.detach().clone())
+
+                train_latents = torch.cat(train_latents)
+
+                anomaly_scores = self._calc_anomaly_score(train_latents)
+                train_losses = anomaly_scores
+
+        self.train(model_state)
+
+        self.threshold = train_losses.quantile(self.threshold_quantile)
+
+        return revert_data
+
+    def test_threshold_quantile(self, train_dataset, val_dataset, quantile):
+
+        revert_data = self.set_threshold_quantile(train_dataset, quantile)
+
+        metrics = self.evaluate(val_dataset, logger_params=None)
+
+        self.revert_threshold(revert_data)
+
+        return metrics
 
     def fit(self, 
             train_dataset, 
             val_dataset = None, 
             max_epochs=10, 
+            trainer_callbacks = None,
             log=False, 
             logger_params={},
             random_state=None):
@@ -361,8 +430,7 @@ class SAE(AEBase, IADModel):
 
     def predict(self, dataset):
         
-        if self.occ_algorithm == "centroid":
-            self.cen_dst_threshold = self.cen_dst_threshold.to(self.device)
+        self.threshold = self.threshold.to(self.device)
         
         model_mode = self.training
         self.eval()
@@ -464,21 +532,9 @@ class SAE(AEBase, IADModel):
         return score
     
     def _calc_predictions(self, x_latent):
-        if self.occ_algorithm == "centroid":
-            cen = self.classifier.means_[0]
-            cen_distance = np.linalg.norm(x_latent.detach().cpu().numpy() - cen, axis=1)
-            preds = torch.tensor(cen_distance, dtype=x_latent.dtype).to(x_latent.device) 
-            preds = F.tanh(preds) > self.cen_dst_threshold
-        elif self.occ_algorithm == "lof":
-            preds = self.classifier.predict(x_latent.detach().cpu().numpy())
-            preds[preds == 1] = 0
-            preds[preds == -1] = 1
-            preds = torch.tensor(preds, dtype=x_latent.dtype).to(x_latent.device)
-        elif self.occ_algorithm == "svm":
-            preds = self.classifier.predict(x_latent.detach().cpu().numpy())
-            preds[preds == 1] = 0
-            preds[preds == -1] = 1
-            preds = torch.tensor(preds, dtype=x_latent.dtype).to(x_latent.device)
+        anomaly_score = self._calc_anomaly_score(x_latent)
+
+        preds = anomaly_score > self.threshold
 
         return preds
     
@@ -501,15 +557,16 @@ class SAE(AEBase, IADModel):
     def _prepare_occ(self, occ_algorithm, **occ_kwargs):
         self.occ_algorithm = occ_algorithm
 
+        self.threshold = 0
+
         if occ_algorithm == "centroid":
             self.classifier = GaussianMixture(n_components = 1, **occ_kwargs)
-            self.cen_dst_threshold = 0
         elif occ_algorithm == "lof":
             self.classifier = LocalOutlierFactor(novelty=True, **occ_kwargs)
         elif occ_algorithm == "svm":
             self.classifier = OneClassSVM(**occ_kwargs)
         elif occ_algorithm == "re":
-            self.threshold = 0
+            pass
         else:
             raise ValueError(f"Unknown OCC algorithm: {occ_algorithm}. Supported algorithms are: centroid, lof, svm, re.")
 

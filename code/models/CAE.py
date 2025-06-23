@@ -344,6 +344,63 @@ class CAE(AEBase, IADModel):
         preds = preds.float().cpu().numpy()
 
         return preds
+    
+    def revert_threshold(self, revert_data):
+
+        self.threshold_quantile = revert_data["threshold_quantile"]
+        self.thresholds = revert_data["thresholds"].to(self.device)
+    
+    def set_threshold_quantile(self, train_dataset, quantile):
+
+        revert_data = {
+            "threshold_quantile": self.threshold_quantile,
+            "thresholds": self.thresholds.clone(),
+        }
+
+        self.threshold_quantile = quantile
+
+        train_loader = self._get_loader(train_dataset, shuffle=True)
+
+        model_state = self.training
+
+        self.eval()
+
+        with torch.no_grad():
+            train_latents = []
+            for batch in train_loader:
+                x, _, _ = batch
+                x_latent = self.encoder(x)
+                train_latents.append(x_latent.detach().clone())
+
+            train_latents = torch.cat(train_latents)
+
+        self.train(model_state)
+
+        self.cluster_centers = self.cluster_centers.to(self.device)
+
+        distances_to_centers = torch.zeros((train_latents.shape[0], self.num_clusters), device=self.device)
+        for i in range(self.num_clusters):
+            distances_to_centers[:, i] = torch.linalg.vector_norm(train_latents - self.cluster_centers[i], ord=2, dim=1)
+        clusters = torch.argmin(distances_to_centers, dim=1)
+        distances_to_the_closest_center = torch.min(distances_to_centers, dim=1).values
+        for i in range(self.num_clusters):
+            distances = distances_to_the_closest_center[clusters == i]
+            if distances.shape[0] > 0:
+                self.thresholds[i] = torch.quantile(distances, self.threshold_quantile)
+            else:
+                self.thresholds[i] = 0
+
+        return revert_data
+
+    def test_threshold_quantile(self, train_dataset, val_dataset, quantile):
+
+        revert_data = self.set_threshold_quantile(train_dataset, quantile)
+
+        metrics = self.evaluate(val_dataset, logger_params=None)
+
+        self.revert_threshold(revert_data)
+
+        return metrics
 
     def fit(self, 
             train_dataset, 
@@ -422,7 +479,7 @@ class CAE(AEBase, IADModel):
 
         return predictions
 
-    def predict_raw(self, dataset):
+    def predict_raw_and_clusters(self, dataset):
 
         self.cluster_centers = self.cluster_centers.to(self.device)
         self.thresholds = self.thresholds.to(self.device)
@@ -433,23 +490,32 @@ class CAE(AEBase, IADModel):
         dataloader = self._get_loader(dataset, shuffle=False)
 
         predictions = []
+        clusters = []
+        labels = []
 
         with torch.no_grad():
             for batch in dataloader:
-                x, _, _ = batch
+                x, y, _ = batch
                 x = x.to(self.device)
                 x_latent = self.encoder(x)
 
-                anomaly_scores, _ = self._calc_clusters(x_latent)
-                anomaly_scores = F.tanh(anomaly_scores)
+                anomaly_score, cluster = self._calc_clusters(x_latent)
+                anomaly_score = F.tanh(anomaly_score)
 
-                predictions.append(anomaly_scores)
+                predictions.append(anomaly_score)
+                clusters.append(cluster)
+                labels.append(y)
 
         predictions = torch.cat(predictions)
+        clusters = torch.cat(clusters)
+        labels = torch.cat(labels)
 
         self.train(mode=model_mode)
 
-        return predictions
+        return predictions, labels, clusters
+    
+    def predict_raw(self, dataset):
+        return self.predict_raw_and_clusters(dataset)[0]
 
     def save(self, path):
         raise NotImplementedError("Save method not implemented")

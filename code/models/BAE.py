@@ -68,6 +68,41 @@ class BAE(IADModel):
         self.birch_fit_sample_size = birch_fit_sample_size
         self.birch_fit_quantile = birch_fit_quantile
 
+    
+    def revert_threshold(self, revert_data):
+
+        for ae in self.autoencoders:
+            ae.revert_threshold(revert_data.pop(0))
+    
+    def set_threshold_quantile(self, train_dataset, quantile):
+
+        revert_data = []
+
+        train_clusters = self.birch.predict(train_dataset.x.cpu().numpy())
+
+        # create separate datasets for each cluster
+        cluster_train_datasets = []
+        for i in range(self.birch.n_clusters):
+            filtered_dataset = self._get_filtered_dataset(train_dataset,
+                                                           filter = train_clusters == i)
+            cluster_train_datasets.append(filtered_dataset)
+
+        for ae, dataset in zip(self.autoencoders, cluster_train_datasets):
+            rd = ae.set_threshold_quantile(dataset, quantile)
+            revert_data.append(rd)
+
+        return revert_data
+
+    def test_threshold_quantile(self, train_dataset, val_dataset, quantile):
+
+        revert_data = self.set_threshold_quantile(train_dataset, quantile)
+
+        metrics = self.evaluate(val_dataset, logger_params=None)
+
+        self.revert_threshold(revert_data)
+
+        return metrics
+
 
     def fit(self, 
             train_dataset, 
