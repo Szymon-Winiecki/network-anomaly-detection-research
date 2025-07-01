@@ -17,3 +17,9 @@ There are several extrnal datasets used in this research. Those are not included
 ### [CIC-IDS2017](https://www.unb.ca/cic/datasets/ids-2017.html)
 
 1. Download `CIC-IDS-2017/CSVs/MachineLearningCSV.zip` file from [dataset's download page](http://cicresearch.ca/CICDataset/CIC-IDS-2017/) and place `MachineLearningCSV.zip` in the `data/CIC-IDS2017/raw` directory
+
+### [CTU-13](https://www.stratosphereips.org/datasets-ctu13)
+
+1. Run `download_CTU13.bat` script to download scenarios 8, 9, 10 and 13 of CTU-13 dataset.
+
+2. One can optionally compress download csv files  to .tar.gz to reduce disk usage (preprocessing script can read data both from csv and .tar.gz file)
