@@ -8,10 +8,13 @@ import pandas as pd
 this_directory = Path(__file__).parent.resolve()
 sys.path.append(str(this_directory / '../datasets'))
 sys.path.append(str(this_directory / '../models'))
+sys.path.append(str(this_directory / '../visualization'))
 
 from datasets.IDS_Dataset import IDS_Dataset
 
 from models.IADModel import IADModel
+
+from visualization.metric_plots import plot_ROC_curve
 
 class CSVLogger:
     """ Logger class to log experiment records to a CSV file. """
@@ -261,7 +264,8 @@ def run_experiment_n_times(model : IADModel,
                             validation_set : str = "val",
                             save_model : bool = False,
                             fit_params = {},
-                            n_runs : int = 3):
+                            n_runs : int = 3,
+                            roc_curve_plot=None):
     
     """ Run an experiment n times with the given model and dataset.
     Args:
@@ -311,6 +315,17 @@ def run_experiment_n_times(model : IADModel,
             save_model=save_model,
             fit_params=fit_params
         )
+
+        if roc_curve_plot is not None:
+            roc_curve_plot = Path(roc_curve_plot)
+            dir = roc_curve_plot.parent
+            file_stem = roc_curve_plot.stem
+            file_stem += f"_{id}_{i}"
+            roc_curve_plot = dir / f"{file_stem}.png"
+            roc_curve_plot.parent.mkdir(parents=True, exist_ok=True)
+
+            fpr, tpr, auroc, cluster_size = new_model.calc_ROC(dataset[validation_set])
+            plot_ROC_curve(fpr, tpr, auroc, cluster_size, new_model.name, dataset[validation_set].name, save_path=roc_curve_plot)
 
         record['pack_id'] = id
         record['run_id'] = i

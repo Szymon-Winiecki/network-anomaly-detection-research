@@ -71,3 +71,25 @@ def plot_latent_space_evolution(latents, labels, model, dataset, epoch, fig= Non
         fig.savefig(save_path)
 
     return fig, axs
+
+
+def plot_latent_space_evolution_gif(latents, labels, model, dataset, epoch, save_path=None):
+    configure_plotting(font_size=25)
+
+    fig, ax = plt.subplots(1, 1, figsize=( 10, 10 ))
+
+    fig.suptitle(f"{model} - ewolucja przestrzeni ukrytej, dane z {dataset}")
+
+    if latents.shape[1] > 2:
+            pca = PCA(n_components=2)
+            latents = pca.fit_transform(latents)
+
+    ax.scatter(latents[:, 0], latents[:, 1], c=labels, cmap='viridis', alpha=0.5, vmin=0, vmax=1)
+
+    ax.set_title(f"Epoka {epoch}.")
+
+    if save_path:
+        path = Path(save_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.tight_layout()
+        fig.savefig(save_path)
